@@ -3,12 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🎯 Mot Secret - Chacun son tour</title>
+    <title>🎯 Mot Secret + Indices</title>
     <style>
         * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, sans-serif; margin: 0; padding: 0; }
         body { background: #f0f4f8; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
-        .container { background: white; max-width: 600px; width: 100%; padding: 30px; border-radius: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+        .container { background: white; max-width: 650px; width: 100%; padding: 30px; border-radius: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
         h1 { font-size: 1.8rem; margin-bottom: 20px; text-align: center; color: #1a202c; }
+        h3 { margin: 15px 0 10px 0; color: #2d3748; }
         .hidden { display: none !important; }
         .input-group { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
         .input-group input, .input-group select { flex: 1; min-width: 120px; padding: 12px 16px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 1rem; }
@@ -16,6 +17,8 @@
         .input-group button:hover { background: #2b6cb0; transform: scale(1.02); }
         .btn-danger { background: #e53e3e !important; }
         .btn-danger:hover { background: #c53030 !important; }
+        .btn-purple { background: #805ad5 !important; }
+        .btn-purple:hover { background: #6b46c1 !important; }
         .guess-item { background: white; padding: 12px 16px; border-radius: 12px; margin-bottom: 10px; display: flex; justify-content: space-between; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
         .guess-word { font-weight: 600; color: #2d3748; }
         .secret-reveal { background: #edf2f7; padding: 10px; border-radius: 10px; text-align: center; font-size: 1.2rem; margin-top: 15px; }
@@ -26,7 +29,13 @@
             0% { transform: scale(1); }
             100% { transform: scale(1.03); }
         }
-        .disabled-input { opacity: 0.5; pointer-events: none; }
+        .riddle-box { background: #faf5ff; padding: 15px; border-radius: 16px; margin-top: 20px; border: 1px solid #e9d5ff; }
+        .riddle-box textarea { width: 100%; padding: 12px; border-radius: 12px; border: 2px solid #e2e8f0; font-family: inherit; resize: vertical; }
+        .riddle-display { background: white; padding: 15px; border-radius: 12px; min-height: 80px; border: 1px solid #e2e8f0; white-space: pre-wrap; line-height: 1.8; }
+        .timer-text { font-size: 0.9rem; color: #718096; margin-top: 5px; font-weight: 500; }
+        .riddle-line { padding: 4px 0; }
+        .riddle-line.revealed { color: #2d3748; }
+        .riddle-line.hidden-line { color: #cbd5e0; font-style: italic; }
     </style>
 </head>
 <body>
@@ -54,6 +63,9 @@
             <span class="badge">👑 Maître</span>
         </div>
         <hr>
+
+        <!-- SECTION MOT SECRET -->
+        <h3>🔒 Mot secret</h3>
         <div class="input-group">
             <input type="text" id="secretInput" placeholder="Entrez le mot secret...">
             <button onclick="setSecret()">🔒 Cacher le mot</button>
@@ -62,7 +74,22 @@
         <hr>
         <h3>📋 Propositions des joueurs :</h3>
         <div id="masterGuessesList"></div>
-        <button onclick="resetGame()" class="btn-danger" style="margin-top:20px; width:100%; padding:10px; border:none; border-radius:12px; color:white; font-weight:bold; cursor:pointer;">🔁 Nouvelle partie</button>
+        <button onclick="resetGame()" class="btn-danger" style="margin-top:20px; width:100%; padding:10px; border:none; border-radius:12px; color:white; font-weight:bold; cursor:pointer;">🔁 Nouvelle partie (efface le mot)</button>
+
+        <hr>
+
+        <!-- SECTION INDICES CHRONOMÉTRÉS -->
+        <div class="riddle-box">
+            <h3>📜 Gestion des indices</h3>
+            <p style="font-size:0.9rem; color:#4a5568; margin-bottom:8px;">Collez votre texte (une ligne = un indice). Les joueurs verront la première ligne immédiatement, puis une nouvelle ligne toutes les 5 minutes.</p>
+            <textarea id="riddleInput" rows="4" placeholder="Exemple :&#10;Il est toujours au cœur des flammes,&#10;Mais c'est loin d'elles qu'on le fonde.&#10;Encore nombreuses y sont les femmes,&#10;Et les étudiants y abondent."></textarea>
+            <div style="display:flex; gap:10px; margin-top:10px; flex-wrap:wrap;">
+                <button onclick="startRiddle()" class="btn-purple" style="padding:8px 20px; border:none; border-radius:8px; color:white; font-weight:bold; cursor:pointer;">▶ Démarrer les indices</button>
+                <button onclick="resetRiddle()" class="btn-danger" style="padding:8px 20px; border:none; border-radius:8px; color:white; font-weight:bold; cursor:pointer;">⏹ Arrêter / Réinitialiser</button>
+            </div>
+            <div id="riddleMasterStatus" style="margin-top:10px; font-size:0.95rem; color:#4a5568; background:white; padding:8px 12px; border-radius:8px; border:1px solid #e9d5ff;"></div>
+            <div id="riddleMasterPreview" style="margin-top:8px; font-size:0.9rem; color:#718096;"></div>
+        </div>
     </div>
 
     <!-- VUE JOUEUR -->
@@ -72,12 +99,24 @@
             <span class="badge">🕵️ Joueur</span>
         </div>
         <hr>
+
+        <!-- SECTION MOT SECRET (Joueur) -->
+        <h3>💬 Proposer un mot</h3>
         <div class="input-group">
             <input type="text" id="guessInput" placeholder="Proposez un mot...">
             <button onclick="sendGuess()" id="sendGuessBtn">📤 Proposer</button>
         </div>
         <div id="playerGuessesList"></div>
         <div id="playerWinMessage" class="win-message hidden">🎉 BRAVO ! Vous avez trouvé le mot !</div>
+
+        <hr>
+
+        <!-- SECTION INDICES (Joueur) -->
+        <div class="riddle-box">
+            <h3>📜 Indices</h3>
+            <div id="riddleDisplay" class="riddle-display">Aucun indice pour l'instant...</div>
+            <div id="riddleTimer" class="timer-text">⏳ En attente des indices...</div>
+        </div>
     </div>
 </div>
 
@@ -105,8 +144,10 @@
     // Variables globales
     let currentRoom = null;
     let myRole = null;
-    let secretWord = null;      // pour le maître
-    let isPlayerFinished = false; // pour le joueur
+    let secretWord = null;
+    let isPlayerFinished = false;
+    let riddleTimerInterval = null;
+    let riddleCountdownInterval = null;
 
     // ============================================================
     // 2. REJOINDRE LA PARTIE
@@ -124,9 +165,9 @@
         if (role === 'master') {
             document.getElementById('masterView').classList.remove('hidden');
             document.getElementById('masterRoomDisplay').textContent = room;
-            // Écouter les propositions pour les afficher
             listenToGuesses(room, 'master');
-            // Lire le mot secret s'il existe déjà
+            listenToRiddleMaster(room);
+            // Lire le secret existant
             db.ref(`rooms/${room}/secretWord`).once('value').then(snap => {
                 const word = snap.val();
                 if (word) {
@@ -139,32 +180,40 @@
             document.getElementById('playerView').classList.remove('hidden');
             document.getElementById('playerRoomDisplay').textContent = room;
             listenToGuesses(room, 'player');
+            listenToRiddlePlayer(room);
         }
     };
 
     // ============================================================
-    // 3. FONCTIONS DU MAÎTRE
+    // 3. FONCTIONS DU MAÎTRE (Mot Secret)
     // ============================================================
     window.setSecret = function() {
         const input = document.getElementById('secretInput');
         const word = input.value.trim().toLowerCase();
         if (!word) { alert('Veuillez entrer un mot.'); return; }
         secretWord = word;
-
-        // Stocker le mot secret dans la base
         db.ref(`rooms/${currentRoom}/secretWord`).set(word).then(() => {
             document.getElementById('secretWordText').textContent = word;
             document.getElementById('secretDisplay').classList.remove('hidden');
             document.getElementById('secretInput').value = '';
-
-            // Vider les anciennes propositions
             db.ref(`rooms/${currentRoom}/guesses`).remove();
             console.log('🔒 Mot secret défini :', word);
-        }).catch(err => console.warn('Erreur écriture secret:', err));
+        });
+    };
+
+    window.resetGame = function() {
+        if (!confirm('Voulez-vous vraiment recommencer une nouvelle partie ?')) return;
+        db.ref(`rooms/${currentRoom}/guesses`).remove();
+        db.ref(`rooms/${currentRoom}/secretWord`).remove();
+        document.getElementById('masterGuessesList').innerHTML = '';
+        document.getElementById('secretDisplay').classList.add('hidden');
+        secretWord = null;
+        // On ne touche pas aux indices
+        console.log('🔁 Partie réinitialisée.');
     };
 
     // ============================================================
-    // 4. ÉCOUTER LES PROPOSITIONS (affichage)
+    // 4. ÉCOUTE DES PROPOSITIONS (joueur + maître)
     // ============================================================
     function listenToGuesses(room, viewer) {
         const guessesRef = db.ref(`rooms/${room}/guesses`);
@@ -186,36 +235,29 @@
             list.appendChild(div);
             list.scrollTop = list.scrollHeight;
 
-            // Si c'est un joueur, on compare avec le mot secret (si connu)
             if (viewer === 'player') {
-                // Lire le secret pour comparer
                 db.ref(`rooms/${room}/secretWord`).once('value').then(snap => {
                     const secret = snap.val();
                     if (secret && guessWord.toLowerCase() === secret.toLowerCase()) {
-                        // Le joueur a trouvé !
-                        console.log(`[Joueur] ✅ Mot trouvé !`);
                         document.getElementById('playerWinMessage').classList.remove('hidden');
                         document.getElementById('guessInput').disabled = true;
                         document.getElementById('sendGuessBtn').style.display = 'none';
                         isPlayerFinished = true;
+                        console.log('[Joueur] ✅ Mot trouvé !');
                     }
-                }).catch(err => console.warn('Erreur lecture secret:', err));
+                });
             }
         });
 
         guessesRef.on('child_removed', () => {
             const listId = (viewer === 'master') ? 'masterGuessesList' : 'playerGuessesList';
             document.getElementById(listId).innerHTML = '';
-            console.log(`[${viewer}] Liste vidée.`);
         });
     }
 
-    // ============================================================
-    // 5. FONCTION DU JOUEUR (proposer)
-    // ============================================================
     window.sendGuess = function() {
         if (isPlayerFinished) {
-            alert('Vous avez déjà trouvé le mot ! Attendez la nouvelle partie.');
+            alert('Vous avez déjà trouvé le mot !');
             return;
         }
         const input = document.getElementById('guessInput');
@@ -223,105 +265,260 @@
         if (!word) { alert('Écrivez un mot !'); return; }
         if (!currentRoom) { alert('Rejoignez une salle d\'abord.'); return; }
 
-        const guessesRef = db.ref(`rooms/${currentRoom}/guesses`);
-        guessesRef.push({ word: word })
+        db.ref(`rooms/${currentRoom}/guesses`).push({ word: word })
             .then(() => console.log(`[Joueur] Envoyé : "${word}"`))
-            .catch(err => {
-                console.warn('Erreur d\'envoi :', err);
-                alert('Erreur de connexion, réessayez.');
-            });
+            .catch(err => { alert('Erreur de connexion.'); });
         input.value = '';
     };
 
     // ============================================================
-    // 6. RÉINITIALISATION (maître)
+    // 5. FONCTIONS DES INDICES (RIDDLE)
     // ============================================================
-    window.resetGame = function() {
-        if (!confirm('Voulez-vous vraiment recommencer une nouvelle partie ?')) return;
-        // Effacer les propositions, le mot secret
-        db.ref(`rooms/${currentRoom}/guesses`).remove();
-        db.ref(`rooms/${currentRoom}/secretWord`).remove();
-        document.getElementById('masterGuessesList').innerHTML = '';
-        document.getElementById('secretDisplay').classList.add('hidden');
-        secretWord = null;
-        // Réactiver le joueur (si nécessaire) : on ne peut pas le faire directement depuis le maître, chaque joueur se réactive quand il voit que le secret a changé.
-        // On peut simplement vider les messages de victoire côté joueur en écoutant les changements du secret.
-        // Nous allons ajouter un écouteur sur secretWord pour réinitialiser chaque joueur.
-        console.log('🔁 Partie réinitialisée.');
+
+    // --- LANCER L'ÉNIGME (Maître) ---
+    window.startRiddle = function() {
+        const textarea = document.getElementById('riddleInput');
+        const rawText = textarea.value;
+        const lines = rawText.split('\n').filter(line => line.trim() !== '');
+        if (lines.length < 2) {
+            alert('Veuillez entrer au moins 2 lignes d\'indices.');
+            return;
+        }
+
+        const room = currentRoom;
+        const riddleRef = db.ref(`rooms/${room}/riddle`);
+
+        // Sauvegarder les lignes, révéler la première ligne, noter l'heure de début
+        riddleRef.set({
+            lines: lines,
+            revealedCount: 1,
+            startTime: Date.now()
+        }).then(() => {
+            console.log('[Maître] Énigme démarrée avec', lines.length, 'lignes.');
+            document.getElementById('riddleInput').value = '';
+            // Lancer le timer pour les prochaines révélations
+            startMasterRiddleTimer(room);
+        }).catch(err => console.warn('Erreur démarrage énigme:', err));
     };
 
-    // ============================================================
-    // 7. ÉCOUTER LES CHANGEMENTS DU SECRET (pour réinitialiser les joueurs)
-    // ============================================================
-    function listenForSecretReset(room) {
-        const secretRef = db.ref(`rooms/${room}/secretWord`);
-        secretRef.on('value', (snapshot) => {
-            const newSecret = snapshot.val();
-            if (!newSecret) {
-                // Le maître a supprimé le secret (nouvelle partie)
-                if (myRole === 'player') {
-                    console.log('[Joueur] Nouvelle partie détectée !');
-                    // Cacher le message de victoire et réactiver
-                    document.getElementById('playerWinMessage').classList.add('hidden');
-                    document.getElementById('guessInput').disabled = false;
-                    document.getElementById('sendGuessBtn').style.display = 'inline-block';
-                    isPlayerFinished = false;
-                    // Vider la liste des propositions (sera déjà vidée par le maître)
-                    document.getElementById('playerGuessesList').innerHTML = '';
+    // --- RÉINITIALISER L'ÉNIGME (Maître) ---
+    window.resetRiddle = function() {
+        if (!confirm('Supprimer tous les indices en cours ?')) return;
+        const room = currentRoom;
+        if (riddleTimerInterval) {
+            clearInterval(riddleTimerInterval);
+            riddleTimerInterval = null;
+        }
+        if (riddleCountdownInterval) {
+            clearInterval(riddleCountdownInterval);
+            riddleCountdownInterval = null;
+        }
+        db.ref(`rooms/${room}/riddle`).remove().then(() => {
+            console.log('[Maître] Énigme réinitialisée.');
+            document.getElementById('riddleMasterStatus').textContent = 'Aucun indice en cours.';
+            document.getElementById('riddleMasterPreview').textContent = '';
+            // Mettre à jour le joueur via l'écouteur
+        });
+    };
+
+    // --- TIMER MAÎTRE (Incrémente toutes les 5 min) ---
+    function startMasterRiddleTimer(room) {
+        if (riddleTimerInterval) clearInterval(riddleTimerInterval);
+        if (riddleCountdownInterval) clearInterval(riddleCountdownInterval);
+
+        const riddleRef = db.ref(`rooms/${room}/riddle`);
+
+        // Fonction pour incrémenter
+        const doIncrement = () => {
+            riddleRef.once('value').then(snap => {
+                const data = snap.val();
+                if (!data || !data.lines) return;
+                if (data.revealedCount < data.lines.length) {
+                    const newCount = data.revealedCount + 1;
+                    riddleRef.update({ revealedCount: newCount });
+                    console.log('[Maître] Nouvel indice dévoilé !');
+                } else {
+                    // Tous les indices sont révélés, arrêter le timer
+                    clearInterval(riddleTimerInterval);
+                    riddleTimerInterval = null;
+                    if (riddleCountdownInterval) {
+                        clearInterval(riddleCountdownInterval);
+                        riddleCountdownInterval = null;
+                    }
+                    document.getElementById('riddleMasterStatus').textContent = '✅ Tous les indices sont révélés !';
                 }
+            });
+        };
+
+        // Démarrer le timer principal (5 minutes)
+        if (riddleTimerInterval) clearInterval(riddleTimerInterval);
+        riddleTimerInterval = setInterval(doIncrement, 5 * 60 * 1000);
+
+        // Démarrer le compte à rebours pour l'affichage
+        updateMasterCountdown(room);
+        if (riddleCountdownInterval) clearInterval(riddleCountdownInterval);
+        riddleCountdownInterval = setInterval(() => {
+            updateMasterCountdown(room);
+        }, 1000);
+    }
+
+    function updateMasterCountdown(room) {
+        const riddleRef = db.ref(`rooms/${room}/riddle`);
+        riddleRef.once('value').then(snap => {
+            const data = snap.val();
+            if (!data || !data.lines) return;
+            const revealed = data.revealedCount || 0;
+            const total = data.lines.length;
+            const startTime = data.startTime || Date.now();
+
+            const nextIndex = revealed; // prochain indice à dévoiler (0-based)
+            if (nextIndex >= total) {
+                document.getElementById('riddleMasterStatus').textContent = `📜 ${total}/${total} indices révélés. Terminé !`;
+                return;
+            }
+
+            const nextRevealTime = startTime + (nextIndex * 5 * 60 * 1000);
+            const now = Date.now();
+            const diff = Math.max(0, nextRevealTime - now);
+            const minutes = Math.floor(diff / (60 * 1000));
+            const seconds = Math.floor((diff % (60 * 1000)) / 1000);
+
+            document.getElementById('riddleMasterStatus').textContent =
+                `📜 ${revealed}/${total} indices révélés. Prochain dans ${minutes}m ${seconds}s.`;
+
+            // Aperçu des lignes révélées
+            const preview = data.lines.slice(0, revealed).join(' | ');
+            document.getElementById('riddleMasterPreview').textContent = `Aperçu : ${preview}`;
+        });
+    }
+
+    // --- ÉCOUTEUR MAÎTRE (pour afficher l'état) ---
+    function listenToRiddleMaster(room) {
+        const riddleRef = db.ref(`rooms/${room}/riddle`);
+        riddleRef.on('value', snap => {
+            const data = snap.val();
+            if (!data || !data.lines) {
+                document.getElementById('riddleMasterStatus').textContent = 'Aucun indice en cours.';
+                document.getElementById('riddleMasterPreview').textContent = '';
+                if (riddleTimerInterval) clearInterval(riddleTimerInterval);
+                if (riddleCountdownInterval) clearInterval(riddleCountdownInterval);
+                return;
+            }
+            // Si des données existent mais le timer n'est pas lancé, on le lance
+            if (!riddleTimerInterval && data.revealedCount < data.lines.length) {
+                startMasterRiddleTimer(room);
             }
         });
     }
 
-    // Lancer l'écoute du secret après avoir rejoint
-    // Ajouter dans joinRoom après l'initialisation :
-    // appel à listenForSecretReset(room) pour le joueur
-    // Je vais intégrer cela dans la fonction joinRoom modifiée ci-dessous.
+    // --- ÉCOUTEUR JOUEUR (affiche les indices et le timer) ---
+    function listenToRiddlePlayer(room) {
+        const riddleRef = db.ref(`rooms/${room}/riddle`);
 
-    // ============================================================
-    // VERSION FINALE DE joinRoom AVEC ÉCOUTE DU SECRET
-    // ============================================================
-    window.joinRoom = function() {
-        const room = document.getElementById('roomCode').value.trim().toUpperCase();
-        const role = document.getElementById('roleSelect').value;
-        if (!room) { alert('Entrez un code de salle.'); return; }
+        // Mettre à jour l'affichage des lignes
+        const updateDisplay = (data) => {
+            const display = document.getElementById('riddleDisplay');
+            const timerEl = document.getElementById('riddleTimer');
 
-        currentRoom = room;
-        myRole = role;
+            if (!data || !data.lines) {
+                display.innerHTML = 'Aucun indice pour l\'instant...';
+                timerEl.textContent = '⏳ En attente des indices...';
+                return;
+            }
 
-        document.getElementById('loginScreen').classList.add('hidden');
+            const lines = data.lines;
+            const revealed = data.revealedCount || 0;
+            const startTime = data.startTime || Date.now();
+            const total = lines.length;
 
-        if (role === 'master') {
-            document.getElementById('masterView').classList.remove('hidden');
-            document.getElementById('masterRoomDisplay').textContent = room;
-            listenToGuesses(room, 'master');
-            // Lire le secret existant
-            db.ref(`rooms/${room}/secretWord`).once('value').then(snap => {
-                const word = snap.val();
-                if (word) {
-                    secretWord = word;
-                    document.getElementById('secretWordText').textContent = word;
-                    document.getElementById('secretDisplay').classList.remove('hidden');
+            // Afficher les lignes révélées
+            if (revealed === 0) {
+                display.innerHTML = '⏳ En attente du premier indice...';
+            } else {
+                let html = '';
+                for (let i = 0; i < revealed && i < total; i++) {
+                    html += `<div class="riddle-line revealed">${i+1}. ${lines[i]}</div>`;
+                }
+                for (let i = revealed; i < total; i++) {
+                    html += `<div class="riddle-line hidden-line">${i+1}. 🔒 Indice caché</div>`;
+                }
+                display.innerHTML = html;
+            }
+
+            // Mettre à jour le compte à rebours
+            const nextIndex = revealed; // prochain à dévoiler (0-based)
+            if (nextIndex >= total) {
+                timerEl.textContent = '✅ Tous les indices sont révélés !';
+                return;
+            }
+
+            const nextRevealTime = startTime + (nextIndex * 5 * 60 * 1000);
+            const now = Date.now();
+            const diff = Math.max(0, nextRevealTime - now);
+            const minutes = Math.floor(diff / (60 * 1000));
+            const seconds = Math.floor((diff % (60 * 1000)) / 1000);
+
+            if (diff > 0) {
+                timerEl.textContent = `⏳ Prochain indice dans ${minutes}m ${seconds}s (${revealed}/${total})`;
+            } else {
+                timerEl.textContent = `🔄 Le prochain indice devrait apparaître dans quelques secondes...`;
+            }
+        };
+
+        // Écouter les changements
+        riddleRef.on('value', snap => {
+            const data = snap.val();
+            updateDisplay(data);
+        });
+
+        // Mettre à jour le timer toutes les secondes (pour le compte à rebours)
+        setInterval(() => {
+            riddleRef.once('value').then(snap => {
+                const data = snap.val();
+                if (!data) return;
+                const display = document.getElementById('riddleDisplay');
+                const timerEl = document.getElementById('riddleTimer');
+
+                const lines = data.lines;
+                const revealed = data.revealedCount || 0;
+                const startTime = data.startTime || Date.now();
+                const total = lines.length;
+
+                const nextIndex = revealed;
+                if (nextIndex >= total) {
+                    timerEl.textContent = '✅ Tous les indices sont révélés !';
+                    return;
+                }
+
+                const nextRevealTime = startTime + (nextIndex * 5 * 60 * 1000);
+                const now = Date.now();
+                const diff = Math.max(0, nextRevealTime - now);
+                const minutes = Math.floor(diff / (60 * 1000));
+                const seconds = Math.floor((diff % (60 * 1000)) / 1000);
+
+                if (diff > 0) {
+                    timerEl.textContent = `⏳ Prochain indice dans ${minutes}m ${seconds}s (${revealed}/${total})`;
+                } else {
+                    timerEl.textContent = `🔄 Le prochain indice devrait apparaître dans quelques secondes...`;
                 }
             });
-        } else {
-            document.getElementById('playerView').classList.remove('hidden');
-            document.getElementById('playerRoomDisplay').textContent = room;
-            listenToGuesses(room, 'player');
-            // Écouter les changements du secret pour la réinitialisation
-            listenForSecretReset(room);
-        }
-    };
+        }, 1000);
+    }
 
-    // Nettoyage
+    // ============================================================
+    // 6. NETTOYAGE
+    // ============================================================
     window.onbeforeunload = function() {
         if (currentRoom) {
             db.ref(`rooms/${currentRoom}/guesses`).off();
             db.ref(`rooms/${currentRoom}/secretWord`).off();
+            db.ref(`rooms/${currentRoom}/riddle`).off();
         }
+        if (riddleTimerInterval) clearInterval(riddleTimerInterval);
+        if (riddleCountdownInterval) clearInterval(riddleCountdownInterval);
     };
 
-    console.log('🎯 Mot Secret - Chacun son tour !');
+    console.log('🎯 Mot Secret + Indices chargé !');
 </script>
 </body>
 </html>
