@@ -87,7 +87,7 @@
 
 <script>
     // ============================================================
-    // 1. CONFIGURATION FIREBASE (URL corrigée sans slash final)
+    // 1. CONFIGURATION FIREBASE (URL corrigée)
     // ============================================================
     const firebaseConfig = {
         apiKey: "AIzaSyADiRMGWxyNzOOsRFrFuSEfi9_2C5M6Nno",
@@ -134,19 +134,11 @@
             listenToStatus(room, 'player');
         }
 
-        // Lecture immédiate du statut (pour les joueurs rejoignant après victoire)
+        // Lecture immédiate du statut
         db.ref(`rooms/${room}/status`).once('value').then((snapshot) => {
             const status = snapshot.val();
             console.log(`[${role}] Statut initial : ${status}`);
-            if (status === 'found') {
-                const winMsgId = (role === 'master') ? 'masterWinMessage' : 'playerWinMessage';
-                document.getElementById(winMsgId).classList.remove('hidden');
-                isGameFinished = true;
-                if (role === 'player') {
-                    document.getElementById('guessInput').disabled = true;
-                    document.getElementById('sendGuessBtn').style.display = 'none';
-                }
-            }
+            handleStatusUpdate(status, role);
         }).catch(err => console.warn("Erreur lecture statut:", err));
     };
 
@@ -168,16 +160,13 @@
             db.ref(`rooms/${currentRoom}/winner`).remove();
             isGameFinished = false;
             document.getElementById('masterGuessesList').innerHTML = '';
-            document.getElementById('masterWinMessage').classList.add('hidden');
-            document.getElementById('playerWinMessage').classList.add('hidden');
-            document.getElementById('guessInput').disabled = false;
-            document.getElementById('sendGuessBtn').style.display = 'inline-block';
+            // Le listener cachera les messages de victoire automatiquement
             console.log('🔄 Nouvelle partie lancée avec le mot :', word);
         }).catch(err => console.warn('Erreur reset:', err));
     };
 
     // ============================================================
-    // 4. ÉCOUTER LES PROPOSITIONS (avec logs)
+    // 4. ÉCOUTER LES PROPOSITIONS
     // ============================================================
     function listenToGuesses(room, viewer) {
         const guessesRef = db.ref(`rooms/${room}/guesses`);
@@ -189,7 +178,6 @@
             const guessWord = data.word;
             console.log(`[${viewer}] Nouveau mot proposé : "${guessWord}"`);
 
-            // Ajouter le mot à la liste (sans badge)
             const listId = (viewer === 'master') ? 'masterGuessesList' : 'playerGuessesList';
             const list = document.getElementById(listId);
             const div = document.createElement('div');
@@ -204,7 +192,6 @@
             list.appendChild(div);
             list.scrollTop = list.scrollHeight;
 
-            // Si c'est le maître, comparer avec le mot secret
             if (viewer === 'master') {
                 console.log(`[Maître] Mot secret actuel : "${secretWord}"`);
                 if (secretWord) {
@@ -230,7 +217,33 @@
     }
 
     // ============================================================
-    // 5. ÉCOUTER LE STATUT DE LA PARTIE (avec logs)
+    // 5. FONCTION CENTRALISÉE POUR GÉRER LE STATUT
+    // ============================================================
+    function handleStatusUpdate(status, viewer) {
+        const winMsgId = (viewer === 'master') ? 'masterWinMessage' : 'playerWinMessage';
+        const winMsg = document.getElementById(winMsgId);
+
+        if (status === 'found') {
+            console.log(`[${viewer}] 🎉 VICTOIRE détectée !`);
+            winMsg.classList.remove('hidden');
+            isGameFinished = true;
+            if (viewer === 'player') {
+                document.getElementById('guessInput').disabled = true;
+                document.getElementById('sendGuessBtn').style.display = 'none';
+            }
+        } else {
+            // Si le statut n'est pas "found" (ex: "active" ou null), on cache la victoire
+            winMsg.classList.add('hidden');
+            isGameFinished = false;
+            if (viewer === 'player') {
+                document.getElementById('guessInput').disabled = false;
+                document.getElementById('sendGuessBtn').style.display = 'inline-block';
+            }
+        }
+    }
+
+    // ============================================================
+    // 6. ÉCOUTER LE STATUT DE LA PARTIE (VERSION CORRIGÉE)
     // ============================================================
     function listenToStatus(room, viewer) {
         const statusRef = db.ref(`rooms/${room}/status`);
@@ -239,21 +252,12 @@
         statusRef.on('value', (snapshot) => {
             const status = snapshot.val();
             console.log(`[${viewer}] Statut reçu : "${status}"`);
-            if (status === 'found') {
-                console.log(`[${viewer}] 🎉 VICTOIRE détectée ! Affichage du message.`);
-                const winMsgId = (viewer === 'master') ? 'masterWinMessage' : 'playerWinMessage';
-                document.getElementById(winMsgId).classList.remove('hidden');
-                isGameFinished = true;
-                if (viewer === 'player') {
-                    document.getElementById('guessInput').disabled = true;
-                    document.getElementById('sendGuessBtn').style.display = 'none';
-                }
-            }
+            handleStatusUpdate(status, viewer);
         });
     }
 
     // ============================================================
-    // 6. FONCTION DU JOUEUR (proposer un mot)
+    // 7. FONCTION DU JOUEUR
     // ============================================================
     window.sendGuess = function() {
         if (isGameFinished) {
@@ -279,7 +283,7 @@
     };
 
     // ============================================================
-    // 7. RÉINITIALISATION (nouvelle partie)
+    // 8. RÉINITIALISATION (nouvelle partie)
     // ============================================================
     window.resetGame = function() {
         if (!confirm('Voulez-vous vraiment recommencer une nouvelle partie ?')) return;
@@ -289,17 +293,14 @@
         db.ref(`rooms/${currentRoom}/winner`).remove();
         document.getElementById('masterGuessesList').innerHTML = '';
         document.getElementById('secretDisplay').classList.add('hidden');
-        document.getElementById('masterWinMessage').classList.add('hidden');
-        document.getElementById('playerWinMessage').classList.add('hidden');
         secretWord = null;
         isGameFinished = false;
-        document.getElementById('guessInput').disabled = false;
-        document.getElementById('sendGuessBtn').style.display = 'inline-block';
+        // Le listener cachera automatiquement les messages de victoire
         console.log('🔁 Partie réinitialisée par le maître.');
     };
 
     // ============================================================
-    // 8. NETTOYAGE DES ÉCOUTEURS
+    // 9. NETTOYAGE DES ÉCOUTEURS
     // ============================================================
     window.onbeforeunload = function() {
         if (currentRoom) {
@@ -308,7 +309,7 @@
         }
     };
 
-    console.log('🎯 Jeu du Mot Secret chargé ! (Version avec logs et lecture initiale)');
+    console.log('🎯 Jeu du Mot Secret chargé ! (Version avec gestion du statut corrigée)');
 </script>
 </body>
 </html>
