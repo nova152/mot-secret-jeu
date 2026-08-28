@@ -175,8 +175,15 @@
             document.getElementById('playerRoomDisplay').textContent = room;
             listenToGuesses(room, 'player');
             listenToRiddlePlayer(room);
-            // Écouter les changements du mot secret pour réinitialiser le joueur
-            listenToSecretReset(room);
+            // Écouter le compteur de reset pour se réinitialiser
+            listenToResetCounter(room);
+            // Lecture initiale : si le joueur a déjà trouvé avant de rejoindre ? On vérifie le secret pour éviter les doublons.
+            db.ref(`rooms/${room}/secretWord`).once('value').then(snap => {
+                const secret = snap.val();
+                if (!secret) {
+                    // Pas de secret, donc pas de victoire en cours
+                }
+            });
         }
     };
 
@@ -199,8 +206,11 @@
 
     window.resetGame = function() {
         if (!confirm('Voulez-vous vraiment recommencer une nouvelle partie ?')) return;
+        // Supprimer les propositions et le secret
         db.ref(`rooms/${currentRoom}/guesses`).remove();
-        db.ref(`rooms/${currentRoom}/secretWord`).remove(); // ← ça déclenche la réinit chez le joueur
+        db.ref(`rooms/${currentRoom}/secretWord`).remove();
+        // Incrémenter un compteur de reset pour notifier les joueurs
+        db.ref(`rooms/${currentRoom}/resetCounter`).transaction(current => (current || 0) + 1);
         document.getElementById('masterGuessesList').innerHTML = '';
         document.getElementById('secretDisplay').classList.add('hidden');
         secretWord = null;
@@ -267,32 +277,20 @@
     };
 
     // ============================================================
-    // 5. ÉCOUTEUR POUR RÉINITIALISER LE JOUEUR (quand le secret est supprimé)
+    // 5. ÉCOUTEUR POUR RÉINITIALISER LE JOUEUR (via resetCounter)
     // ============================================================
-    function listenToSecretReset(room) {
-        const secretRef = db.ref(`rooms/${room}/secretWord`);
-        secretRef.on('value', (snapshot) => {
+    function listenToResetCounter(room) {
+        const resetRef = db.ref(`rooms/${room}/resetCounter`);
+        resetRef.on('value', (snapshot) => {
             const val = snapshot.val();
-            console.log('[Joueur] Secret changé :', val);
-            if (!val) {
-                // Le maître a supprimé le mot secret → réinitialiser le joueur
-                document.getElementById('playerWinMessage').classList.add('hidden');
-                document.getElementById('guessInput').disabled = false;
-                document.getElementById('sendGuessBtn').style.display = 'inline-block';
-                isPlayerFinished = false;
-                // Vider la liste des propositions (elle sera vidée par le maître aussi)
-                document.getElementById('playerGuessesList').innerHTML = '';
-                console.log('[Joueur] Réinitialisé pour une nouvelle partie.');
-            } else {
-                // Un nouveau secret est défini, on remet à zéro
-                // (cela permet de réinitialiser si jamais le joueur était en victoire)
-                document.getElementById('playerWinMessage').classList.add('hidden');
-                document.getElementById('guessInput').disabled = false;
-                document.getElementById('sendGuessBtn').style.display = 'inline-block';
-                isPlayerFinished = false;
-                document.getElementById('playerGuessesList').innerHTML = '';
-                console.log('[Joueur] Nouveau mot secret détecté, prêt à jouer.');
-            }
+            console.log('[Joueur] Reset détecté, compteur :', val);
+            // Réinitialiser le joueur
+            document.getElementById('playerWinMessage').classList.add('hidden');
+            document.getElementById('guessInput').disabled = false;
+            document.getElementById('sendGuessBtn').style.display = 'inline-block';
+            isPlayerFinished = false;
+            document.getElementById('playerGuessesList').innerHTML = '';
+            console.log('[Joueur] Réinitialisé suite au reset.');
         });
     }
 
@@ -517,12 +515,13 @@
             db.ref(`rooms/${currentRoom}/guesses`).off();
             db.ref(`rooms/${currentRoom}/secretWord`).off();
             db.ref(`rooms/${currentRoom}/riddle`).off();
+            db.ref(`rooms/${currentRoom}/resetCounter`).off();
         }
         if (riddleTimerInterval) clearInterval(riddleTimerInterval);
         if (riddleCountdownInterval) clearInterval(riddleCountdownInterval);
     };
 
-    console.log('🎯 Mot Secret + Indices chargé (réinit automatique) !');
+    console.log('🎯 Mot Secret + Indices chargé (réinit via resetCounter) !');
 </script>
 </body>
 </html>
