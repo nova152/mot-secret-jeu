@@ -21,6 +21,7 @@
         .btn-purple:hover { background: #6b46c1 !important; }
         .guess-item { background: white; padding: 12px 16px; border-radius: 12px; margin-bottom: 10px; display: flex; justify-content: space-between; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
         .guess-word { font-weight: 600; color: #2d3748; }
+        .guess-player { font-size: 0.8rem; color: #718096; background: #edf2f7; padding: 2px 10px; border-radius: 12px; }
         .secret-reveal { background: #edf2f7; padding: 10px; border-radius: 10px; text-align: center; font-size: 1.2rem; margin-top: 15px; }
         .badge { background: #48bb78; color: white; padding: 4px 12px; border-radius: 50px; font-size: 0.8rem; }
         hr { margin: 20px 0; border: 1px dashed #e2e8f0; }
@@ -36,6 +37,7 @@
         .riddle-line { padding: 4px 0; }
         .riddle-line.revealed { color: #2d3748; }
         .riddle-line.hidden-line { color: #cbd5e0; font-style: italic; }
+        .player-name { font-weight: 600; color: #4a5568; }
     </style>
 </head>
 <body>
@@ -46,9 +48,12 @@
     <!-- ÉCRAN DE CONNEXION -->
     <div id="loginScreen">
         <div class="input-group">
-            <input type="text" id="roomCode" placeholder="Code de la salle (ex: A1B2)" value="SALLE1">
-            <select id="roleSelect">
-                <option value="master">👑 Maître du jeu</option>
+            <input type="text" id="playerNameInput" placeholder="Votre pseudo..." value="Joueur1" style="flex:1;">
+        </div>
+        <div class="input-group">
+            <input type="text" id="roomCode" placeholder="Code de la salle (ex: A1B2)" value="SALLE1" style="flex:1;">
+            <select id="roleSelect" style="flex:0.8;">
+                <option value="master">👑 Maître</option>
                 <option value="player">🕵️ Joueur</option>
             </select>
         </div>
@@ -67,13 +72,13 @@
         <h3>🔒 Mot secret</h3>
         <div class="input-group">
             <input type="text" id="secretInput" placeholder="Entrez le mot secret...">
-            <button onclick="setSecret()">🔒 Cacher le mot</button>
+            <button onclick="setSecret()">🔒 Cacher</button>
         </div>
         <div id="secretDisplay" class="secret-reveal hidden">Mot secret : <strong id="secretWordText">???</strong></div>
         <hr>
         <h3>📋 Propositions des joueurs :</h3>
         <div id="masterGuessesList"></div>
-        <button onclick="resetGame()" class="btn-danger" style="margin-top:20px; width:100%; padding:10px; border:none; border-radius:12px; color:white; font-weight:bold; cursor:pointer;">🔁 Nouvelle partie (efface le mot)</button>
+        <button onclick="resetGame()" class="btn-danger" style="margin-top:20px; width:100%; padding:10px; border:none; border-radius:12px; color:white; font-weight:bold; cursor:pointer;">🔁 Nouvelle partie</button>
 
         <hr>
         <div class="riddle-box">
@@ -81,8 +86,8 @@
             <p style="font-size:0.9rem; color:#4a5568; margin-bottom:8px;">Collez votre texte (une ligne = un indice). Les joueurs verront la première ligne immédiatement, puis une nouvelle ligne toutes les 5 minutes.</p>
             <textarea id="riddleInput" rows="4" placeholder="Exemple :&#10;Il est toujours au cœur des flammes,&#10;Mais c'est loin d'elles qu'on le fonde.&#10;Encore nombreuses y sont les femmes,&#10;Et les étudiants y abondent."></textarea>
             <div style="display:flex; gap:10px; margin-top:10px; flex-wrap:wrap;">
-                <button onclick="startRiddle()" class="btn-purple" style="padding:8px 20px; border:none; border-radius:8px; color:white; font-weight:bold; cursor:pointer;">▶ Démarrer les indices</button>
-                <button onclick="resetRiddle()" class="btn-danger" style="padding:8px 20px; border:none; border-radius:8px; color:white; font-weight:bold; cursor:pointer;">⏹ Arrêter / Réinitialiser</button>
+                <button onclick="startRiddle()" class="btn-purple" style="padding:8px 20px; border:none; border-radius:8px; color:white; font-weight:bold; cursor:pointer;">▶ Démarrer</button>
+                <button onclick="resetRiddle()" class="btn-danger" style="padding:8px 20px; border:none; border-radius:8px; color:white; font-weight:bold; cursor:pointer;">⏹ Arrêter</button>
             </div>
             <div id="riddleMasterStatus" style="margin-top:10px; font-size:0.95rem; color:#4a5568; background:white; padding:8px 12px; border-radius:8px; border:1px solid #e9d5ff;"></div>
             <div id="riddleMasterPreview" style="margin-top:8px; font-size:0.9rem; color:#718096;"></div>
@@ -138,6 +143,7 @@
     // Variables globales
     let currentRoom = null;
     let myRole = null;
+    let myPlayerName = null;      // ← nouveau
     let secretWord = null;
     let isPlayerFinished = false;
     let riddleTimerInterval = null;
@@ -147,6 +153,11 @@
     // 2. REJOINDRE LA PARTIE
     // ============================================================
     window.joinRoom = function() {
+        const nameInput = document.getElementById('playerNameInput');
+        const playerName = nameInput.value.trim();
+        if (!playerName) { alert('Veuillez entrer un pseudo.'); return; }
+        myPlayerName = playerName;
+
         const room = document.getElementById('roomCode').value.trim().toUpperCase();
         const role = document.getElementById('roleSelect').value;
         if (!room) { alert('Entrez un code de salle.'); return; }
@@ -175,15 +186,7 @@
             document.getElementById('playerRoomDisplay').textContent = room;
             listenToGuesses(room, 'player');
             listenToRiddlePlayer(room);
-            // Écouter le compteur de reset pour se réinitialiser
             listenToResetCounter(room);
-            // Lecture initiale : si le joueur a déjà trouvé avant de rejoindre ? On vérifie le secret pour éviter les doublons.
-            db.ref(`rooms/${room}/secretWord`).once('value').then(snap => {
-                const secret = snap.val();
-                if (!secret) {
-                    // Pas de secret, donc pas de victoire en cours
-                }
-            });
         }
     };
 
@@ -206,10 +209,8 @@
 
     window.resetGame = function() {
         if (!confirm('Voulez-vous vraiment recommencer une nouvelle partie ?')) return;
-        // Supprimer les propositions et le secret
         db.ref(`rooms/${currentRoom}/guesses`).remove();
         db.ref(`rooms/${currentRoom}/secretWord`).remove();
-        // Incrémenter un compteur de reset pour notifier les joueurs
         db.ref(`rooms/${currentRoom}/resetCounter`).transaction(current => (current || 0) + 1);
         document.getElementById('masterGuessesList').innerHTML = '';
         document.getElementById('secretDisplay').classList.add('hidden');
@@ -218,7 +219,7 @@
     };
 
     // ============================================================
-    // 4. ÉCOUTE DES PROPOSITIONS (joueur + maître)
+    // 4. ÉCOUTE DES PROPOSITIONS (avec pseudo)
     // ============================================================
     function listenToGuesses(room, viewer) {
         const guessesRef = db.ref(`rooms/${room}/guesses`);
@@ -227,19 +228,23 @@
         guessesRef.on('child_added', (snapshot) => {
             const data = snapshot.val();
             const guessWord = data.word;
-            console.log(`[${viewer}] Proposition reçue : "${guessWord}"`);
+            const playerName = data.playerName || 'Anonyme';
+            console.log(`[${viewer}] Proposition de "${playerName}" : "${guessWord}"`);
 
             const listId = (viewer === 'master') ? 'masterGuessesList' : 'playerGuessesList';
             const list = document.getElementById(listId);
             const div = document.createElement('div');
             div.className = 'guess-item';
-            const wordSpan = document.createElement('span');
-            wordSpan.className = 'guess-word';
-            wordSpan.textContent = guessWord;
-            div.appendChild(wordSpan);
+
+            const leftSpan = document.createElement('span');
+            leftSpan.innerHTML = `<span class="guess-player">${playerName}</span> <span class="guess-word">${guessWord}</span>`;
+            div.appendChild(leftSpan);
+
+            // Pour le joueur, on n'affiche pas de badge supplémentaire
             list.appendChild(div);
             list.scrollTop = list.scrollHeight;
 
+            // Vérifier si c'est le bon mot (côté joueur)
             if (viewer === 'player') {
                 db.ref(`rooms/${room}/secretWord`).once('value').then(snap => {
                     const secret = snap.val();
@@ -260,6 +265,9 @@
         });
     }
 
+    // ============================================================
+    // 5. ENVOI DE PROPOSITION (avec pseudo)
+    // ============================================================
     window.sendGuess = function() {
         if (isPlayerFinished) {
             alert('Vous avez déjà trouvé le mot !');
@@ -269,22 +277,24 @@
         const word = input.value.trim();
         if (!word) { alert('Écrivez un mot !'); return; }
         if (!currentRoom) { alert('Rejoignez une salle d\'abord.'); return; }
+        if (!myPlayerName) { alert('Votre pseudo est manquant.'); return; }
 
-        db.ref(`rooms/${currentRoom}/guesses`).push({ word: word })
-            .then(() => console.log(`[Joueur] Envoyé : "${word}"`))
-            .catch(err => { alert('Erreur de connexion.'); });
+        db.ref(`rooms/${currentRoom}/guesses`).push({
+            word: word,
+            playerName: myPlayerName
+        }).then(() => console.log(`[Joueur] Envoyé : "${word}"`))
+          .catch(err => { alert('Erreur de connexion.'); });
         input.value = '';
     };
 
     // ============================================================
-    // 5. ÉCOUTEUR POUR RÉINITIALISER LE JOUEUR (via resetCounter)
+    // 6. ÉCOUTEUR POUR RÉINITIALISER LE JOUEUR (via resetCounter)
     // ============================================================
     function listenToResetCounter(room) {
         const resetRef = db.ref(`rooms/${room}/resetCounter`);
         resetRef.on('value', (snapshot) => {
             const val = snapshot.val();
             console.log('[Joueur] Reset détecté, compteur :', val);
-            // Réinitialiser le joueur
             document.getElementById('playerWinMessage').classList.add('hidden');
             document.getElementById('guessInput').disabled = false;
             document.getElementById('sendGuessBtn').style.display = 'inline-block';
@@ -295,9 +305,8 @@
     }
 
     // ============================================================
-    // 6. FONCTIONS DES INDICES (RIDDLE)
+    // 7. FONCTIONS DES INDICES (RIDDLE) – inchangées
     // ============================================================
-
     window.startRiddle = function() {
         const textarea = document.getElementById('riddleInput');
         const rawText = textarea.value;
@@ -478,7 +487,6 @@
             riddleRef.once('value').then(snap => {
                 const data = snap.val();
                 if (!data) return;
-                const display = document.getElementById('riddleDisplay');
                 const timerEl = document.getElementById('riddleTimer');
 
                 const lines = data.lines;
@@ -508,7 +516,7 @@
     }
 
     // ============================================================
-    // 7. NETTOYAGE
+    // 8. NETTOYAGE
     // ============================================================
     window.onbeforeunload = function() {
         if (currentRoom) {
@@ -521,7 +529,7 @@
         if (riddleCountdownInterval) clearInterval(riddleCountdownInterval);
     };
 
-    console.log('🎯 Mot Secret + Indices chargé (réinit via resetCounter) !');
+    console.log('🎯 Mot Secret + Indices + Pseudo chargé !');
 </script>
 </body>
 </html>
