@@ -64,7 +64,6 @@
         </div>
         <hr>
 
-        <!-- SECTION MOT SECRET -->
         <h3>🔒 Mot secret</h3>
         <div class="input-group">
             <input type="text" id="secretInput" placeholder="Entrez le mot secret...">
@@ -77,8 +76,6 @@
         <button onclick="resetGame()" class="btn-danger" style="margin-top:20px; width:100%; padding:10px; border:none; border-radius:12px; color:white; font-weight:bold; cursor:pointer;">🔁 Nouvelle partie (efface le mot)</button>
 
         <hr>
-
-        <!-- SECTION INDICES CHRONOMÉTRÉS -->
         <div class="riddle-box">
             <h3>📜 Gestion des indices</h3>
             <p style="font-size:0.9rem; color:#4a5568; margin-bottom:8px;">Collez votre texte (une ligne = un indice). Les joueurs verront la première ligne immédiatement, puis une nouvelle ligne toutes les 5 minutes.</p>
@@ -100,7 +97,6 @@
         </div>
         <hr>
 
-        <!-- SECTION MOT SECRET (Joueur) -->
         <h3>💬 Proposer un mot</h3>
         <div class="input-group">
             <input type="text" id="guessInput" placeholder="Proposez un mot...">
@@ -110,8 +106,6 @@
         <div id="playerWinMessage" class="win-message hidden">🎉 BRAVO ! Vous avez trouvé le mot !</div>
 
         <hr>
-
-        <!-- SECTION INDICES (Joueur) -->
         <div class="riddle-box">
             <h3>📜 Indices</h3>
             <div id="riddleDisplay" class="riddle-display">Aucun indice pour l'instant...</div>
@@ -181,6 +175,8 @@
             document.getElementById('playerRoomDisplay').textContent = room;
             listenToGuesses(room, 'player');
             listenToRiddlePlayer(room);
+            // Écouter les changements du mot secret pour réinitialiser le joueur
+            listenToSecretReset(room);
         }
     };
 
@@ -204,11 +200,10 @@
     window.resetGame = function() {
         if (!confirm('Voulez-vous vraiment recommencer une nouvelle partie ?')) return;
         db.ref(`rooms/${currentRoom}/guesses`).remove();
-        db.ref(`rooms/${currentRoom}/secretWord`).remove();
+        db.ref(`rooms/${currentRoom}/secretWord`).remove(); // ← ça déclenche la réinit chez le joueur
         document.getElementById('masterGuessesList').innerHTML = '';
         document.getElementById('secretDisplay').classList.add('hidden');
         secretWord = null;
-        // On ne touche pas aux indices
         console.log('🔁 Partie réinitialisée.');
     };
 
@@ -272,10 +267,39 @@
     };
 
     // ============================================================
-    // 5. FONCTIONS DES INDICES (RIDDLE)
+    // 5. ÉCOUTEUR POUR RÉINITIALISER LE JOUEUR (quand le secret est supprimé)
+    // ============================================================
+    function listenToSecretReset(room) {
+        const secretRef = db.ref(`rooms/${room}/secretWord`);
+        secretRef.on('value', (snapshot) => {
+            const val = snapshot.val();
+            console.log('[Joueur] Secret changé :', val);
+            if (!val) {
+                // Le maître a supprimé le mot secret → réinitialiser le joueur
+                document.getElementById('playerWinMessage').classList.add('hidden');
+                document.getElementById('guessInput').disabled = false;
+                document.getElementById('sendGuessBtn').style.display = 'inline-block';
+                isPlayerFinished = false;
+                // Vider la liste des propositions (elle sera vidée par le maître aussi)
+                document.getElementById('playerGuessesList').innerHTML = '';
+                console.log('[Joueur] Réinitialisé pour une nouvelle partie.');
+            } else {
+                // Un nouveau secret est défini, on remet à zéro
+                // (cela permet de réinitialiser si jamais le joueur était en victoire)
+                document.getElementById('playerWinMessage').classList.add('hidden');
+                document.getElementById('guessInput').disabled = false;
+                document.getElementById('sendGuessBtn').style.display = 'inline-block';
+                isPlayerFinished = false;
+                document.getElementById('playerGuessesList').innerHTML = '';
+                console.log('[Joueur] Nouveau mot secret détecté, prêt à jouer.');
+            }
+        });
+    }
+
+    // ============================================================
+    // 6. FONCTIONS DES INDICES (RIDDLE)
     // ============================================================
 
-    // --- LANCER L'ÉNIGME (Maître) ---
     window.startRiddle = function() {
         const textarea = document.getElementById('riddleInput');
         const rawText = textarea.value;
@@ -288,7 +312,6 @@
         const room = currentRoom;
         const riddleRef = db.ref(`rooms/${room}/riddle`);
 
-        // Sauvegarder les lignes, révéler la première ligne, noter l'heure de début
         riddleRef.set({
             lines: lines,
             revealedCount: 1,
@@ -296,12 +319,10 @@
         }).then(() => {
             console.log('[Maître] Énigme démarrée avec', lines.length, 'lignes.');
             document.getElementById('riddleInput').value = '';
-            // Lancer le timer pour les prochaines révélations
             startMasterRiddleTimer(room);
         }).catch(err => console.warn('Erreur démarrage énigme:', err));
     };
 
-    // --- RÉINITIALISER L'ÉNIGME (Maître) ---
     window.resetRiddle = function() {
         if (!confirm('Supprimer tous les indices en cours ?')) return;
         const room = currentRoom;
@@ -317,18 +338,15 @@
             console.log('[Maître] Énigme réinitialisée.');
             document.getElementById('riddleMasterStatus').textContent = 'Aucun indice en cours.';
             document.getElementById('riddleMasterPreview').textContent = '';
-            // Mettre à jour le joueur via l'écouteur
         });
     };
 
-    // --- TIMER MAÎTRE (Incrémente toutes les 5 min) ---
     function startMasterRiddleTimer(room) {
         if (riddleTimerInterval) clearInterval(riddleTimerInterval);
         if (riddleCountdownInterval) clearInterval(riddleCountdownInterval);
 
         const riddleRef = db.ref(`rooms/${room}/riddle`);
 
-        // Fonction pour incrémenter
         const doIncrement = () => {
             riddleRef.once('value').then(snap => {
                 const data = snap.val();
@@ -338,7 +356,6 @@
                     riddleRef.update({ revealedCount: newCount });
                     console.log('[Maître] Nouvel indice dévoilé !');
                 } else {
-                    // Tous les indices sont révélés, arrêter le timer
                     clearInterval(riddleTimerInterval);
                     riddleTimerInterval = null;
                     if (riddleCountdownInterval) {
@@ -350,13 +367,9 @@
             });
         };
 
-        // Démarrer le timer principal (5 minutes)
-        if (riddleTimerInterval) clearInterval(riddleTimerInterval);
         riddleTimerInterval = setInterval(doIncrement, 5 * 60 * 1000);
 
-        // Démarrer le compte à rebours pour l'affichage
         updateMasterCountdown(room);
-        if (riddleCountdownInterval) clearInterval(riddleCountdownInterval);
         riddleCountdownInterval = setInterval(() => {
             updateMasterCountdown(room);
         }, 1000);
@@ -371,7 +384,7 @@
             const total = data.lines.length;
             const startTime = data.startTime || Date.now();
 
-            const nextIndex = revealed; // prochain indice à dévoiler (0-based)
+            const nextIndex = revealed;
             if (nextIndex >= total) {
                 document.getElementById('riddleMasterStatus').textContent = `📜 ${total}/${total} indices révélés. Terminé !`;
                 return;
@@ -386,13 +399,11 @@
             document.getElementById('riddleMasterStatus').textContent =
                 `📜 ${revealed}/${total} indices révélés. Prochain dans ${minutes}m ${seconds}s.`;
 
-            // Aperçu des lignes révélées
             const preview = data.lines.slice(0, revealed).join(' | ');
             document.getElementById('riddleMasterPreview').textContent = `Aperçu : ${preview}`;
         });
     }
 
-    // --- ÉCOUTEUR MAÎTRE (pour afficher l'état) ---
     function listenToRiddleMaster(room) {
         const riddleRef = db.ref(`rooms/${room}/riddle`);
         riddleRef.on('value', snap => {
@@ -404,18 +415,15 @@
                 if (riddleCountdownInterval) clearInterval(riddleCountdownInterval);
                 return;
             }
-            // Si des données existent mais le timer n'est pas lancé, on le lance
             if (!riddleTimerInterval && data.revealedCount < data.lines.length) {
                 startMasterRiddleTimer(room);
             }
         });
     }
 
-    // --- ÉCOUTEUR JOUEUR (affiche les indices et le timer) ---
     function listenToRiddlePlayer(room) {
         const riddleRef = db.ref(`rooms/${room}/riddle`);
 
-        // Mettre à jour l'affichage des lignes
         const updateDisplay = (data) => {
             const display = document.getElementById('riddleDisplay');
             const timerEl = document.getElementById('riddleTimer');
@@ -431,7 +439,6 @@
             const startTime = data.startTime || Date.now();
             const total = lines.length;
 
-            // Afficher les lignes révélées
             if (revealed === 0) {
                 display.innerHTML = '⏳ En attente du premier indice...';
             } else {
@@ -445,8 +452,7 @@
                 display.innerHTML = html;
             }
 
-            // Mettre à jour le compte à rebours
-            const nextIndex = revealed; // prochain à dévoiler (0-based)
+            const nextIndex = revealed;
             if (nextIndex >= total) {
                 timerEl.textContent = '✅ Tous les indices sont révélés !';
                 return;
@@ -465,13 +471,11 @@
             }
         };
 
-        // Écouter les changements
         riddleRef.on('value', snap => {
             const data = snap.val();
             updateDisplay(data);
         });
 
-        // Mettre à jour le timer toutes les secondes (pour le compte à rebours)
         setInterval(() => {
             riddleRef.once('value').then(snap => {
                 const data = snap.val();
@@ -506,7 +510,7 @@
     }
 
     // ============================================================
-    // 6. NETTOYAGE
+    // 7. NETTOYAGE
     // ============================================================
     window.onbeforeunload = function() {
         if (currentRoom) {
@@ -518,7 +522,7 @@
         if (riddleCountdownInterval) clearInterval(riddleCountdownInterval);
     };
 
-    console.log('🎯 Mot Secret + Indices chargé !');
+    console.log('🎯 Mot Secret + Indices chargé (réinit automatique) !');
 </script>
 </body>
 </html>
