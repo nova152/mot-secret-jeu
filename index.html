@@ -26,7 +26,6 @@
             0% { transform: scale(1); }
             100% { transform: scale(1.03); }
         }
-        .disabled-input { opacity: 0.5; pointer-events: none; }
     </style>
 </head>
 <body>
@@ -88,12 +87,12 @@
 
 <script>
     // ============================================================
-    // 1. VOTRE CONFIGURATION FIREBASE
+    // 1. CONFIGURATION FIREBASE (URL corrigée sans slash final)
     // ============================================================
     const firebaseConfig = {
         apiKey: "AIzaSyADiRMGWxyNzOOsRFrFuSEfi9_2C5M6Nno",
         authDomain: "chocolat-3d0ca.firebaseapp.com",
-        databaseURL: "https://chocolat-3d0ca-default-rtdb.europe-west1.firebasedatabase.app/",
+        databaseURL: "https://chocolat-3d0ca-default-rtdb.europe-west1.firebasedatabase.app",
         projectId: "chocolat-3d0ca",
         storageBucket: "chocolat-3d0ca.firebasestorage.app",
         messagingSenderId: "585091545809",
@@ -135,7 +134,7 @@
             listenToStatus(room, 'player');
         }
 
-        // Lecture immédiate du statut pour éviter les décalages
+        // Lecture immédiate du statut (pour les joueurs rejoignant après victoire)
         db.ref(`rooms/${room}/status`).once('value').then((snapshot) => {
             const status = snapshot.val();
             console.log(`[${role}] Statut initial : ${status}`);
@@ -270,7 +269,6 @@
         const newGuessRef = guessesRef.push();
         newGuessRef.set({
             word: word
-            // Pas de champ "result"
         }).then(() => {
             console.log(`[Joueur] Mot proposé : "${word}"`);
         }).catch(err => {
