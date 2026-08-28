@@ -218,7 +218,7 @@
     };
 
     // ============================================================
-    // 4. ÉCOUTE DES PROPOSITIONS (avec pseudo + correction)
+    // 4. ÉCOUTE DES PROPOSITIONS (affichage filtré)
     // ============================================================
     function listenToGuesses(room, viewer) {
         const guessesRef = db.ref(`rooms/${room}/guesses`);
@@ -229,6 +229,12 @@
             const guessWord = data.word;
             const playerName = data.playerName || 'Anonyme';
             console.log(`[${viewer}] Proposition de "${playerName}" : "${guessWord}"`);
+
+            // FILTRE : côté joueur, on affiche UNIQUEMENT ses propres propositions
+            if (viewer === 'player' && playerName !== myPlayerName) {
+                // Ne pas afficher les propositions des autres
+                return;
+            }
 
             const listId = (viewer === 'master') ? 'masterGuessesList' : 'playerGuessesList';
             const list = document.getElementById(listId);
@@ -241,30 +247,28 @@
             list.appendChild(div);
             list.scrollTop = list.scrollHeight;
 
-            // Côté joueur : on vérifie si le mot est correct
-            if (viewer === 'player') {
+            // Côté joueur : on vérifie si le mot est correct (mais seulement pour ses propres mots)
+            if (viewer === 'player' && playerName === myPlayerName) {
                 db.ref(`rooms/${room}/secretWord`).once('value').then(snap => {
                     const secret = snap.val();
                     if (secret && guessWord.toLowerCase() === secret.toLowerCase()) {
-                        // Seul le joueur qui a proposé ce mot reçoit le message
-                        if (playerName === myPlayerName) {
-                            document.getElementById('playerWinMessage').classList.remove('hidden');
-                            document.getElementById('guessInput').disabled = true;
-                            document.getElementById('sendGuessBtn').style.display = 'none';
-                            isPlayerFinished = true;
-                            console.log('[Joueur] ✅ Vous avez trouvé le mot !');
-                        } else {
-                            // Un autre joueur a trouvé, on ne fait rien ici
-                            console.log(`[Joueur] Le mot a été trouvé par ${playerName}, mais vous continuez.`);
-                        }
+                        document.getElementById('playerWinMessage').classList.remove('hidden');
+                        document.getElementById('guessInput').disabled = true;
+                        document.getElementById('sendGuessBtn').style.display = 'none';
+                        isPlayerFinished = true;
+                        console.log('[Joueur] ✅ Vous avez trouvé le mot !');
                     }
                 });
             }
         });
 
         guessesRef.on('child_removed', () => {
-            const listId = (viewer === 'master') ? 'masterGuessesList' : 'playerGuessesList';
-            document.getElementById(listId).innerHTML = '';
+            // On vide la liste (maître) ou on laisse le joueur se réinitialiser via le resetCounter
+            if (viewer === 'master') {
+                document.getElementById('masterGuessesList').innerHTML = '';
+            } else {
+                document.getElementById('playerGuessesList').innerHTML = '';
+            }
         });
     }
 
@@ -532,7 +536,7 @@
         if (riddleCountdownInterval) clearInterval(riddleCountdownInterval);
     };
 
-    console.log('🎯 Mot Secret + Indices + Pseudo (correction victoire individuelle) chargé !');
+    console.log('🎯 Mot Secret + Indices + Pseudo (affichage privé) chargé !');
 </script>
 </body>
 </html>
