@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎯 Mot Secret - Multijoueur</title>
+    <style>
+        * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, sans-serif; margin: 0; padding: 0; }
+        body { background: #f0f4f8; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
+        .container { background: white; max-width: 600px; width: 100%; padding: 30px; border-radius: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+        h1 { font-size: 1.8rem; margin-bottom: 20px; text-align: center; color: #1a202c; }
+        .hidden { display: none !important; }
+        .input-group { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
+        .input-group input, .input-group select { flex: 1; min-width: 120px; padding: 12px 16px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 1rem; }
+        .input-group button { padding: 12px 24px; background: #3182ce; color: white; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .input-group button:hover { background: #2b6cb0; transform: scale(1.02); }
+        .btn-danger { background: #e53e3e !important; }
+        .btn-danger:hover { background: #c53030 !important; }
+        .card { background: #f7fafc; padding: 20px; border-radius: 16px; margin-top: 20px; border: 1px solid #e2e8f0; }
+        .guess-item { background: white; padding: 12px 16px; border-radius: 12px; margin-bottom: 10px; display: flex; justify-content: space-between; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .guess-word { font-weight: 600; color: #2d3748; }
+        .result-oui { color: #38a169; font-weight: 800; background: #f0fff4; padding: 4px 12px; border-radius: 20px; }
+        .result-non { color: #e53e3e; font-weight: 800; background: #fff5f5; padding: 4px 12px; border-radius: 20px; }
+        .secret-reveal { background: #edf2f7; padding: 10px; border-radius: 10px; text-align: center; font-size: 1.2rem; margin-top: 15px; }
+        .badge { background: #48bb78; color: white; padding: 4px 12px; border-radius: 50px; font-size: 0.8rem; }
+        hr { margin: 20px 0; border: 1px dashed #e2e8f0; }
+    </style>
+</head>
+<body>
+
+<div class="container" id="app">
+    <h1>🎯 Mot Secret</h1>
+
+    <!-- ÉCRAN DE CONNEXION -->
+    <div id="loginScreen">
+        <div class="input-group">
+            <input type="text" id="roomCode" placeholder="Code de la salle (ex: A1B2)" value="SALLE1">
+            <select id="roleSelect">
+                <option value="master">👑 Maître du jeu</option>
+                <option value="player">🕵️ Joueur</option>
+            </select>
+        </div>
+        <button onclick="joinRoom()" style="width:100%; padding:14px; background:#48bb78; color:white; border:none; border-radius:12px; font-weight:bold; font-size:1.1rem; cursor:pointer;">Rejoindre la partie</button>
+        <p style="font-size:0.8rem; color:#718096; margin-top:10px; text-align:center;">Tous les joueurs doivent entrer le même code de salle.</p>
+    </div>
+
+    <!-- VUE MAÎTRE DU JEU -->
+    <div id="masterView" class="hidden">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span>Salle : <strong id="masterRoomDisplay"></strong></span>
+            <span class="badge">👑 Maître</span>
+        </div>
+        <hr>
+        <div class="input-group">
+            <input type="text" id="secretInput" placeholder="Entrez le mot secret...">
+            <button onclick="setSecret()">🔒 Cacher le mot</button>
+        </div>
+        <div id="secretDisplay" class="secret-reveal hidden">Mot secret : <strong id="secretWordText">???</strong></div>
+        <hr>
+        <h3>📋 Propositions des joueurs :</h3>
+        <div id="masterGuessesList"></div>
+        <button onclick="resetGame()" class="btn-danger" style="margin-top:20px; width:100%; padding:10px; border:none; border-radius:12px; color:white; font-weight:bold; cursor:pointer;">🔁 Nouvelle partie</button>
+    </div>
+
+    <!-- VUE JOUEUR -->
+    <div id="playerView" class="hidden">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span>Salle : <strong id="playerRoomDisplay"></strong></span>
+            <span class="badge">🕵️ Joueur</span>
+        </div>
+        <hr>
+        <div class="input-group">
+            <input type="text" id="guessInput" placeholder="Proposez un mot...">
+            <button onclick="sendGuess()">📤 Proposer</button>
+        </div>
+        <div id="playerGuessesList"></div>
+        <div id="winMessage" class="hidden" style="background:#c6f6d5; padding:15px; border-radius:12px; margin-top:15px; text-align:center; font-weight:bold; font-size:1.2rem; color:#22543d;">
+            🎉 BRAVO ! Le mot a été trouvé !
+        </div>
+    </div>
+</div>
+
+<!-- FIREBASE SDK -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+<script>
+    // ============================================================
+    // 1. REMPLACEZ ICI PAR VOTRE CONFIGURATION FIREBASE
+    // ============================================================
+    const firebaseConfig = {
+  apiKey: "AIzaSyADiRMGWxyNzOOsRFrFuSEfi9_2C5M6Nno",
+  authDomain: "chocolat-3d0ca.firebaseapp.com",
+  projectId: "chocolat-3d0ca",
+  storageBucket: "chocolat-3d0ca.firebasestorage.app",
+  messagingSenderId: "585091545809",
+  appId: "1:585091545809:web:433be1328c21d3738ea3f0"
+};
+
+    // Initialisation
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    // Variables globales
+    let currentRoom = null;
+    let myRole = null;
+    let secretWord = null; // Stocké uniquement chez le maître
+    let isGameFinished = false;
+
+    // ============================================================
+    // 2. FONCTIONS DE REJOINDRE
+    // ============================================================
+    window.joinRoom = function() {
+        const room = document.getElementById('roomCode').value.trim().toUpperCase();
+        const role = document.getElementById('roleSelect').value;
+        if (!room) { alert('Entrez un code de salle.'); return; }
+
+        currentRoom = room;
+        myRole = role;
+
+        // Cacher l'écran de login
+        document.getElementById('loginScreen').classList.add('hidden');
+
+        if (role === 'master') {
+            document.getElementById('masterView').classList.remove('hidden');
+            document.getElementById('masterRoomDisplay').textContent = room;
+            // Écouter les nouvelles propositions
+            listenToGuesses(room, 'master');
+        } else {
+            document.getElementById('playerView').classList.remove('hidden');
+            document.getElementById('playerRoomDisplay').textContent = room;
+            // Écouter les résultats (pour voir si le mot est trouvé)
+            listenToGuesses(room, 'player');
+        }
+    };
+
+    // ============================================================
+    // 3. FONCTIONS DU MAÎTRE
+    // ============================================================
+    window.setSecret = function() {
+        const input = document.getElementById('secretInput');
+        const word = input.value.trim().toLowerCase();
+        if (!word) { alert('Veuillez entrer un mot.'); return; }
+        secretWord = word;
+        document.getElementById('secretWordText').textContent = word;
+        document.getElementById('secretDisplay').classList.remove('hidden');
+        document.getElementById('secretInput').value = '';
+        // On supprime les anciens résultats dans la base
+        const guessesRef = db.ref(`rooms/${currentRoom}/guesses`);
+        guessesRef.remove().then(() => {
+            // On notifie que le jeu est relancé
+            db.ref(`rooms/${currentRoom}/status`).set('active');
+            isGameFinished = false;
+            document.getElementById('masterGuessesList').innerHTML = '';
+        });
+    };
+
+    // Écouter les propositions (côté maître)
+    function listenToGuesses(room, viewer) {
+        const guessesRef = db.ref(`rooms/${room}/guesses`);
+        guessesRef.off(); // Nettoyer les anciens écouteurs
+        
+        guessesRef.on('child_added', (snapshot) => {
+            const data = snapshot.val();
+            const guessId = snapshot.key;
+            const guessWord = data.word;
+
+            if (viewer === 'master') {
+                // Le maître compare avec son mot secret
+                if (!secretWord) {
+                    // Si le maître n'a pas encore défini de mot, on affiche juste "en attente"
+                    addGuessToUI('masterGuessesList', guessWord, '⏳ En attente');
+                    return;
+                }
+
+                const isCorrect = (guessWord.toLowerCase() === secretWord.toLowerCase());
+                const result = isCorrect ? 'OUI' : 'NON';
+
+                // On met à jour la base de données avec le résultat pour que les joueurs le voient
+                db.ref(`rooms/${room}/guesses/${guessId}/result`).set(result);
+                if (isCorrect) {
+                    db.ref(`rooms/${room}/status`).set('found');
+                    isGameFinished = true;
+                }
+                // Ajouter à l'UI du maître
+                addGuessToUI('masterGuessesList', guessWord, result);
+            } else {
+                // Côté joueur : on écoute les mises à jour des résultats
+                const result = data.result || '⏳ En attente...';
+                addGuessToUI('playerGuessesList', guessWord, result);
+                if (result === 'OUI') {
+                    document.getElementById('winMessage').classList.remove('hidden');
+                    isGameFinished = true;
+                }
+            }
+        });
+
+        // On écoute aussi les suppressions pour vider la liste
+        guessesRef.on('child_removed', () => {
+            if (viewer === 'master') document.getElementById('masterGuessesList').innerHTML = '';
+            else document.getElementById('playerGuessesList').innerHTML = '';
+        });
+    }
+
+    // ============================================================
+    // 4. FONCTIONS DU JOUEUR
+    // ============================================================
+    window.sendGuess = function() {
+        if (isGameFinished) {
+            alert('Le mot a déjà été trouvé ! Le maître va lancer une nouvelle partie.');
+            return;
+        }
+        const input = document.getElementById('guessInput');
+        const word = input.value.trim();
+        if (!word) { alert('Écrivez un mot !'); return; }
+        if (!currentRoom) { alert('Rejoignez une salle d\'abord.'); return; }
+
+        const guessesRef = db.ref(`rooms/${currentRoom}/guesses`);
+        const newGuessRef = guessesRef.push();
+        newGuessRef.set({
+            word: word,
+            result: null // Le maître remplira ce champ
+        });
+        input.value = '';
+    };
+
+    // ============================================================
+    // 5. FONCTIONS UI (Affichage)
+    // ============================================================
+    function addGuessToUI(listId, word, result) {
+        const list = document.getElementById(listId);
+        const div = document.createElement('div');
+        div.className = 'guess-item';
+        
+        const wordSpan = document.createElement('span');
+        wordSpan.className = 'guess-word';
+        wordSpan.textContent = word;
+
+        const resultSpan = document.createElement('span');
+        if (result === 'OUI') {
+            resultSpan.className = 'result-oui';
+            resultSpan.textContent = '✅ OUI';
+        } else if (result === 'NON') {
+            resultSpan.className = 'result-non';
+            resultSpan.textContent = '❌ NON';
+        } else {
+            resultSpan.style.color = '#718096';
+            resultSpan.textContent = '⏳ ...';
+        }
+        
+        div.appendChild(wordSpan);
+        div.appendChild(resultSpan);
+        list.appendChild(div);
+        // Scroll en bas
+        list.scrollTop = list.scrollHeight;
+    }
+
+    // ============================================================
+    // 6. RÉINITIALISATION
+    // ============================================================
+    window.resetGame = function() {
+        if (!confirm('Voulez-vous vraiment recommencer une nouvelle partie ?')) return;
+        const guessesRef = db.ref(`rooms/${currentRoom}/guesses`);
+        guessesRef.remove();
+        db.ref(`rooms/${currentRoom}/status`).set('active');
+        document.getElementById('masterGuessesList').innerHTML = '';
+        document.getElementById('secretDisplay').classList.add('hidden');
+        secretWord = null;
+        isGameFinished = false;
+        document.getElementById('winMessage').classList.add('hidden');
+    };
+
+    // Nettoyer les écouteurs si on recharge la page
+    window.onbeforeunload = function() {
+        if (currentRoom) {
+            db.ref(`rooms/${currentRoom}/guesses`).off();
+        }
+    };
+
+    console.log('🎯 Jeu du Mot Secret chargé !');
+    console.log('📖 Instructions : Le maître entre un mot, les joueurs proposent. Le site dit OUI/NON automatiquement.');
+</script>
+</body>
+</html>
