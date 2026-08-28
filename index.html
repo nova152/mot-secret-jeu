@@ -143,7 +143,7 @@
     // Variables globales
     let currentRoom = null;
     let myRole = null;
-    let myPlayerName = null;      // ← nouveau
+    let myPlayerName = null;
     let secretWord = null;
     let isPlayerFinished = false;
     let riddleTimerInterval = null;
@@ -172,7 +172,6 @@
             document.getElementById('masterRoomDisplay').textContent = room;
             listenToGuesses(room, 'master');
             listenToRiddleMaster(room);
-            // Lire le secret existant
             db.ref(`rooms/${room}/secretWord`).once('value').then(snap => {
                 const word = snap.val();
                 if (word) {
@@ -191,7 +190,7 @@
     };
 
     // ============================================================
-    // 3. FONCTIONS DU MAÎTRE (Mot Secret)
+    // 3. FONCTIONS DU MAÎTRE
     // ============================================================
     window.setSecret = function() {
         const input = document.getElementById('secretInput');
@@ -219,7 +218,7 @@
     };
 
     // ============================================================
-    // 4. ÉCOUTE DES PROPOSITIONS (avec pseudo)
+    // 4. ÉCOUTE DES PROPOSITIONS (avec pseudo + correction)
     // ============================================================
     function listenToGuesses(room, viewer) {
         const guessesRef = db.ref(`rooms/${room}/guesses`);
@@ -239,21 +238,25 @@
             const leftSpan = document.createElement('span');
             leftSpan.innerHTML = `<span class="guess-player">${playerName}</span> <span class="guess-word">${guessWord}</span>`;
             div.appendChild(leftSpan);
-
-            // Pour le joueur, on n'affiche pas de badge supplémentaire
             list.appendChild(div);
             list.scrollTop = list.scrollHeight;
 
-            // Vérifier si c'est le bon mot (côté joueur)
+            // Côté joueur : on vérifie si le mot est correct
             if (viewer === 'player') {
                 db.ref(`rooms/${room}/secretWord`).once('value').then(snap => {
                     const secret = snap.val();
                     if (secret && guessWord.toLowerCase() === secret.toLowerCase()) {
-                        document.getElementById('playerWinMessage').classList.remove('hidden');
-                        document.getElementById('guessInput').disabled = true;
-                        document.getElementById('sendGuessBtn').style.display = 'none';
-                        isPlayerFinished = true;
-                        console.log('[Joueur] ✅ Mot trouvé !');
+                        // Seul le joueur qui a proposé ce mot reçoit le message
+                        if (playerName === myPlayerName) {
+                            document.getElementById('playerWinMessage').classList.remove('hidden');
+                            document.getElementById('guessInput').disabled = true;
+                            document.getElementById('sendGuessBtn').style.display = 'none';
+                            isPlayerFinished = true;
+                            console.log('[Joueur] ✅ Vous avez trouvé le mot !');
+                        } else {
+                            // Un autre joueur a trouvé, on ne fait rien ici
+                            console.log(`[Joueur] Le mot a été trouvé par ${playerName}, mais vous continuez.`);
+                        }
                     }
                 });
             }
@@ -266,7 +269,7 @@
     }
 
     // ============================================================
-    // 5. ENVOI DE PROPOSITION (avec pseudo)
+    // 5. ENVOI DE PROPOSITION
     // ============================================================
     window.sendGuess = function() {
         if (isPlayerFinished) {
@@ -305,7 +308,7 @@
     }
 
     // ============================================================
-    // 7. FONCTIONS DES INDICES (RIDDLE) – inchangées
+    // 7. FONCTIONS DES INDICES (inchangées)
     // ============================================================
     window.startRiddle = function() {
         const textarea = document.getElementById('riddleInput');
@@ -529,7 +532,7 @@
         if (riddleCountdownInterval) clearInterval(riddleCountdownInterval);
     };
 
-    console.log('🎯 Mot Secret + Indices + Pseudo chargé !');
+    console.log('🎯 Mot Secret + Indices + Pseudo (correction victoire individuelle) chargé !');
 </script>
 </body>
 </html>
