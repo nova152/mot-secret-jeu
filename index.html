@@ -159,7 +159,8 @@
     let playerTimerInterval = null;
     let playerRiddleRef = null;
     let playerData = null;
-    let pauseStartTime = null; // moment où la pause a commencé (local)
+    let timerPaused = false;        // indicateur local pour savoir si le timer est en pause
+    let pauseStartTime = null;      // timestamp local du début de pause
 
     // ============================================================
     // 3. REJOINDRE LA PARTIE
@@ -318,19 +319,20 @@
             if (playerRiddleRef) {
                 playerRiddleRef.remove();
             }
+            timerPaused = false;
             pauseStartTime = null;
             console.log('[Joueur] Réinitialisé suite au reset.');
         });
     }
 
     // ============================================================
-    // 6. TIMER INDIVIDUEL AVEC PAUSE IMMÉDIATE (visibilitychange)
+    // 6. TIMER INDIVIDUEL AVEC PAUSE FIABLE (visibilitychange)
     // ============================================================
     function startPlayerTimer(room, playerName) {
         playerRiddleRef = db.ref(`rooms/${room}/riddle/players/${playerName}`);
         const presenceRef = db.ref(`rooms/${room}/presence/${playerName}`);
 
-        // Configurer la présence
+        // Configurer la présence (pour affichage)
         presenceRef.set({
             online: true,
             lastSeen: firebase.database.ServerValue.TIMESTAMP
@@ -350,8 +352,8 @@
                 if (isOnline) {
                     statusEl.textContent = '🟢 En ligne';
                     statusEl.className = 'online-indicator';
-                    // Si on est en ligne mais que la page est cachée, on garde l'indicateur de pause
-                    if (document.hidden) {
+                    // Si le timer est en pause à cause de la visibilité, on garde l'indicateur
+                    if (timerPaused || document.hidden) {
                         pauseIndicator.classList.remove('hidden');
                     } else {
                         pauseIndicator.classList.add('hidden');
@@ -377,6 +379,8 @@
                     playerTimerInterval = null;
                 }
                 playerRiddleRef.remove();
+                timerPaused = false;
+                pauseStartTime = null;
                 return;
             }
 
@@ -417,10 +421,10 @@
 
                 playerData = data;
 
-                // Fonction de mise à jour du timer
+                // Fonction de mise à jour du timer (appelée par l'intervalle)
                 const updateTimer = () => {
-                    // Si la page est cachée, on ne met pas à jour le timer (la pause est gérée par visibilitychange)
-                    if (document.hidden) {
+                    // Si le timer est en pause (manuelle ou visibilité), on ne fait rien
+                    if (timerPaused || document.hidden) {
                         return;
                     }
 
@@ -430,9 +434,8 @@
                         const isCurrentlyOnline = presenceData && presenceData.online === true;
 
                         if (!isCurrentlyOnline) {
-                            document.getElementById('riddlePauseIndicator').classList.remove('hidden');
-                            document.getElementById('onlineStatus').textContent = '🔴 Hors ligne';
-                            document.getElementById('onlineStatus').className = 'pause-indicator';
+                            // Hors ligne : on met en pause via la fonction pauseTimer
+                            pauseTimer();
                             return;
                         }
 
@@ -499,8 +502,10 @@
                     }
                 }
 
-                // Gestion de la pause/reprise via visibilitychange
+                // Fonctions pause / reprise
                 function pauseTimer() {
+                    if (timerPaused) return; // déjà en pause
+                    timerPaused = true;
                     if (playerTimerInterval) {
                         clearInterval(playerTimerInterval);
                         playerTimerInterval = null;
@@ -509,20 +514,22 @@
                     document.getElementById('riddlePauseIndicator').classList.remove('hidden');
                     document.getElementById('onlineStatus').textContent = '⏸ En pause';
                     document.getElementById('onlineStatus').className = 'pause-indicator';
-                    console.log('[Joueur] Timer mis en pause (page cachée).');
+                    console.log('[Joueur] Timer mis en pause.');
                 }
 
                 function resumeTimer() {
+                    if (!timerPaused) return; // déjà en cours
+                    // Ajouter le temps de pause au pausedTime
                     if (pauseStartTime) {
                         const pauseDuration = Date.now() - pauseStartTime;
-                        // Ajouter la durée de pause à pausedTime
                         playerData.pausedTime = (playerData.pausedTime || 0) + pauseDuration;
                         playerRiddleRef.update({ pausedTime: playerData.pausedTime });
                         console.log(`[Joueur] Reprise après ${pauseDuration}ms de pause.`);
                         pauseStartTime = null;
                     }
+                    timerPaused = false;
 
-                    // Relancer le timer
+                    // Relancer l'intervalle
                     if (playerTimerInterval) clearInterval(playerTimerInterval);
                     playerTimerInterval = setInterval(updateTimer, 1000);
                     updateTimer(); // mise à jour immédiate
@@ -542,10 +549,9 @@
                     }
                 };
 
-                // Écouter pagehide (pour fermeture de l'onglet)
+                // Écouter pagehide (fermeture de l'onglet)
                 const pageHideHandler = () => {
                     pauseTimer();
-                    // Mettre à jour la présence pour le serveur
                     presenceRef.update({
                         online: false,
                         lastSeen: firebase.database.ServerValue.TIMESTAMP
@@ -563,8 +569,6 @@
                 if (playerTimerInterval) clearInterval(playerTimerInterval);
                 playerTimerInterval = setInterval(updateTimer, 1000);
                 updateTimer();
-
-                // Nettoyer les handlers à la fermeture de la page (déjà géré par beforeunload)
             });
         });
     }
@@ -639,7 +643,6 @@
         if (currentRoom) {
             db.ref(`rooms/${currentRoom}`).off();
         }
-        // Supprimer les handlers
         if (window._visibilityHandler) {
             document.removeEventListener('visibilitychange', window._visibilityHandler);
         }
@@ -648,7 +651,7 @@
         }
     };
 
-    console.log('🎯 Mot Secret + Indices individuels (pause immédiate) chargé !');
+    console.log('🎯 Mot Secret + Indices individuels (pause fiable) chargé !');
 </script>
 </body>
 </html>
