@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🎯 Mot Secret + Indices</title>
+    <title>🎯 Mot Secret + Indices individuels</title>
     <style>
         * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, sans-serif; margin: 0; padding: 0; }
         body { background: #f0f4f8; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
@@ -37,7 +37,10 @@
         .riddle-line { padding: 4px 0; }
         .riddle-line.revealed { color: #2d3748; }
         .riddle-line.hidden-line { color: #cbd5e0; font-style: italic; }
-        .player-name { font-weight: 600; color: #4a5568; }
+        .pause-indicator { color: #e53e3e; font-weight: bold; background: #fff5f5; padding: 2px 10px; border-radius: 12px; margin-left: 8px; }
+        .online-indicator { color: #38a169; font-weight: bold; background: #f0fff4; padding: 2px 10px; border-radius: 12px; margin-left: 8px; }
+        .progress-bar { width: 100%; height: 6px; background: #e2e8f0; border-radius: 3px; margin-top: 8px; overflow: hidden; }
+        .progress-bar-fill { height: 100%; background: #48bb78; border-radius: 3px; transition: width 1s; }
     </style>
 </head>
 <body>
@@ -82,8 +85,8 @@
 
         <hr>
         <div class="riddle-box">
-            <h3>📜 Gestion des indices</h3>
-            <p style="font-size:0.9rem; color:#4a5568; margin-bottom:8px;">Collez votre texte (une ligne = un indice). Les joueurs verront la première ligne immédiatement, puis une nouvelle ligne toutes les 5 minutes.</p>
+            <h3>📜 Gestion des indices (global)</h3>
+            <p style="font-size:0.9rem; color:#4a5568; margin-bottom:8px;">Les joueurs ont chacun leur propre timer. Le maître voit l'état global de l'énigme.</p>
             <textarea id="riddleInput" rows="4" placeholder="Exemple :&#10;Il est toujours au cœur des flammes,&#10;Mais c'est loin d'elles qu'on le fonde.&#10;Encore nombreuses y sont les femmes,&#10;Et les étudiants y abondent."></textarea>
             <div style="display:flex; gap:10px; margin-top:10px; flex-wrap:wrap;">
                 <button onclick="startRiddle()" class="btn-purple" style="padding:8px 20px; border:none; border-radius:8px; color:white; font-weight:bold; cursor:pointer;">▶ Démarrer</button>
@@ -99,6 +102,7 @@
         <div style="display:flex; justify-content:space-between; align-items:center;">
             <span>Salle : <strong id="playerRoomDisplay"></strong></span>
             <span class="badge">🕵️ Joueur</span>
+            <span id="onlineStatus" class="online-indicator">🟢 En ligne</span>
         </div>
         <hr>
 
@@ -112,9 +116,12 @@
 
         <hr>
         <div class="riddle-box">
-            <h3>📜 Indices</h3>
+            <h3>📜 Vos indices <span id="riddlePauseIndicator" class="hidden pause-indicator">⏸ En pause</span></h3>
             <div id="riddleDisplay" class="riddle-display">Aucun indice pour l'instant...</div>
             <div id="riddleTimer" class="timer-text">⏳ En attente des indices...</div>
+            <div class="progress-bar">
+                <div id="riddleProgress" class="progress-bar-fill" style="width:0%"></div>
+            </div>
         </div>
     </div>
 </div>
@@ -140,17 +147,21 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
 
-    // Variables globales
+    // ============================================================
+    // 2. VARIABLES GLOBALES
+    // ============================================================
     let currentRoom = null;
     let myRole = null;
     let myPlayerName = null;
     let secretWord = null;
     let isPlayerFinished = false;
-    let riddleTimerInterval = null;
-    let riddleCountdownInterval = null;
+
+    // Timer individuel pour le joueur
+    let playerTimerInterval = null;
+    let playerRiddleData = null; // { lines, revealedCount, startTime, pausedTime }
 
     // ============================================================
-    // 2. REJOINDRE LA PARTIE
+    // 3. REJOINDRE LA PARTIE
     // ============================================================
     window.joinRoom = function() {
         const nameInput = document.getElementById('playerNameInput');
@@ -184,13 +195,14 @@
             document.getElementById('playerView').classList.remove('hidden');
             document.getElementById('playerRoomDisplay').textContent = room;
             listenToGuesses(room, 'player');
-            listenToRiddlePlayer(room);
             listenToResetCounter(room);
+            // Lancer le timer individuel du joueur
+            startPlayerTimer(room, playerName);
         }
     };
 
     // ============================================================
-    // 3. FONCTIONS DU MAÎTRE
+    // 4. FONCTIONS DU MAÎTRE
     // ============================================================
     window.setSecret = function() {
         const input = document.getElementById('secretInput');
@@ -211,6 +223,8 @@
         db.ref(`rooms/${currentRoom}/guesses`).remove();
         db.ref(`rooms/${currentRoom}/secretWord`).remove();
         db.ref(`rooms/${currentRoom}/resetCounter`).transaction(current => (current || 0) + 1);
+        // Réinitialiser les indices pour tous les joueurs
+        db.ref(`rooms/${currentRoom}/riddle`).remove();
         document.getElementById('masterGuessesList').innerHTML = '';
         document.getElementById('secretDisplay').classList.add('hidden');
         secretWord = null;
@@ -218,7 +232,7 @@
     };
 
     // ============================================================
-    // 4. ÉCOUTE DES PROPOSITIONS (affichage filtré)
+    // 5. PROPOSITIONS
     // ============================================================
     function listenToGuesses(room, viewer) {
         const guessesRef = db.ref(`rooms/${room}/guesses`);
@@ -228,11 +242,8 @@
             const data = snapshot.val();
             const guessWord = data.word;
             const playerName = data.playerName || 'Anonyme';
-            console.log(`[${viewer}] Proposition de "${playerName}" : "${guessWord}"`);
 
-            // FILTRE : côté joueur, on affiche UNIQUEMENT ses propres propositions
             if (viewer === 'player' && playerName !== myPlayerName) {
-                // Ne pas afficher les propositions des autres
                 return;
             }
 
@@ -240,14 +251,12 @@
             const list = document.getElementById(listId);
             const div = document.createElement('div');
             div.className = 'guess-item';
-
             const leftSpan = document.createElement('span');
             leftSpan.innerHTML = `<span class="guess-player">${playerName}</span> <span class="guess-word">${guessWord}</span>`;
             div.appendChild(leftSpan);
             list.appendChild(div);
             list.scrollTop = list.scrollHeight;
 
-            // Côté joueur : on vérifie si le mot est correct (mais seulement pour ses propres mots)
             if (viewer === 'player' && playerName === myPlayerName) {
                 db.ref(`rooms/${room}/secretWord`).once('value').then(snap => {
                     const secret = snap.val();
@@ -263,7 +272,6 @@
         });
 
         guessesRef.on('child_removed', () => {
-            // On vide la liste (maître) ou on laisse le joueur se réinitialiser via le resetCounter
             if (viewer === 'master') {
                 document.getElementById('masterGuessesList').innerHTML = '';
             } else {
@@ -272,9 +280,6 @@
         });
     }
 
-    // ============================================================
-    // 5. ENVOI DE PROPOSITION
-    // ============================================================
     window.sendGuess = function() {
         if (isPlayerFinished) {
             alert('Vous avez déjà trouvé le mot !');
@@ -294,9 +299,6 @@
         input.value = '';
     };
 
-    // ============================================================
-    // 6. ÉCOUTEUR POUR RÉINITIALISER LE JOUEUR (via resetCounter)
-    // ============================================================
     function listenToResetCounter(room) {
         const resetRef = db.ref(`rooms/${room}/resetCounter`);
         resetRef.on('value', (snapshot) => {
@@ -307,13 +309,232 @@
             document.getElementById('sendGuessBtn').style.display = 'inline-block';
             isPlayerFinished = false;
             document.getElementById('playerGuessesList').innerHTML = '';
+            // Réinitialiser l'affichage des indices
+            document.getElementById('riddleDisplay').innerHTML = 'Aucun indice pour l\'instant...';
+            document.getElementById('riddleTimer').textContent = '⏳ En attente des indices...';
+            document.getElementById('riddleProgress').style.width = '0%';
+            // Réinitialiser le timer individuel
+            if (playerTimerInterval) {
+                clearInterval(playerTimerInterval);
+                playerTimerInterval = null;
+            }
+            // Si un nouveau riddle est démarré, le timer sera relancé par l'écouteur
             console.log('[Joueur] Réinitialisé suite au reset.');
         });
     }
 
     // ============================================================
-    // 7. FONCTIONS DES INDICES (inchangées)
+    // 6. TIMER INDIVIDUEL POUR JOUEUR
     // ============================================================
+    function startPlayerTimer(room, playerName) {
+        const playerRiddleRef = db.ref(`rooms/${room}/riddle/players/${playerName}`);
+
+        // Écouter les changements des lignes (quand le maître démarre l'énigme)
+        const riddleLinesRef = db.ref(`rooms/${room}/riddle/lines`);
+        riddleLinesRef.on('value', (snap) => {
+            const lines = snap.val();
+            if (!lines) {
+                // Pas d'énigme en cours
+                document.getElementById('riddleDisplay').innerHTML = 'Aucun indice pour l\'instant...';
+                document.getElementById('riddleTimer').textContent = '⏳ En attente des indices...';
+                document.getElementById('riddleProgress').style.width = '0%';
+                if (playerTimerInterval) {
+                    clearInterval(playerTimerInterval);
+                    playerTimerInterval = null;
+                }
+                // Supprimer les données du joueur
+                playerRiddleRef.remove();
+                return;
+            }
+
+            // L'énigme existe, on va gérer le timer individuel
+            const totalLines = lines.length;
+            const intervalMs = 5 * 60 * 1000; // 5 minutes
+
+            // Lire les données existantes du joueur, ou en créer
+            playerRiddleRef.once('value').then(snap => {
+                let data = snap.val();
+                if (!data) {
+                    // Premier démarrage
+                    data = {
+                        joinedAt: Date.now(),
+                        pausedTime: 0,
+                        revealedCount: 0,
+                        isPaused: false
+                    };
+                    playerRiddleRef.set(data);
+                }
+                playerRiddleData = data;
+
+                // Fonction qui met à jour l'affichage et le compte
+                const updateTimer = () => {
+                    // Vérifier si le joueur est toujours en ligne (on utilise onDisconnect)
+                    // Pour simuler la pause, on regarde si la page est visible
+                    const isPageVisible = !document.hidden;
+                    const currentPaused = data.isPaused || !isPageVisible;
+
+                    if (currentPaused && !data.isPaused) {
+                        // Le joueur vient de partir -> mettre en pause
+                        data.isPaused = true;
+                        data.pausedTime = (data.pausedTime || 0) + (Date.now() - data.lastUpdate);
+                        playerRiddleRef.update({ isPaused: true, pausedTime: data.pausedTime });
+                        document.getElementById('riddlePauseIndicator').classList.remove('hidden');
+                        document.getElementById('onlineStatus').textContent = '🔴 Hors ligne';
+                        document.getElementById('onlineStatus').className = 'pause-indicator';
+                        return;
+                    }
+
+                    if (!currentPaused && data.isPaused) {
+                        // Le joueur revient -> reprendre
+                        data.isPaused = false;
+                        data.joinedAt = Date.now() - data.pausedTime;
+                        data.pausedTime = 0;
+                        playerRiddleRef.update({ isPaused: false, joinedAt: data.joinedAt, pausedTime: 0 });
+                        document.getElementById('riddlePauseIndicator').classList.add('hidden');
+                        document.getElementById('onlineStatus').textContent = '🟢 En ligne';
+                        document.getElementById('onlineStatus').className = 'online-indicator';
+                    }
+
+                    // Calculer le temps écoulé effectif (depuis joinedAt, en tenant compte des pauses)
+                    const elapsed = Date.now() - data.joinedAt - (data.pausedTime || 0);
+                    const currentRevealed = data.revealedCount || 0;
+                    const nextRevealed = Math.min(Math.floor(elapsed / intervalMs) + 1, totalLines);
+
+                    if (nextRevealed > currentRevealed) {
+                        // Nouveaux indices à dévoiler
+                        const newCount = Math.min(nextRevealed, totalLines);
+                        data.revealedCount = newCount;
+                        playerRiddleRef.update({ revealedCount: newCount });
+                        // Mettre à jour l'affichage
+                        updateRiddleDisplay(lines, newCount, totalLines);
+                        // Mise à jour du timer
+                        updateTimerDisplay(lines, newCount, totalLines, elapsed, intervalMs);
+                    } else {
+                        // Mettre à jour le timer
+                        updateTimerDisplay(lines, currentRevealed, totalLines, elapsed, intervalMs);
+                    }
+
+                    // Sauvegarder l'heure de dernière mise à jour
+                    data.lastUpdate = Date.now();
+                    playerRiddleRef.update({ lastUpdate: data.lastUpdate });
+                };
+
+                // Fonction d'affichage des indices
+                function updateRiddleDisplay(lines, revealed, total) {
+                    const display = document.getElementById('riddleDisplay');
+                    if (revealed === 0) {
+                        display.innerHTML = '⏳ En attente du premier indice...';
+                        return;
+                    }
+                    let html = '';
+                    for (let i = 0; i < revealed && i < total; i++) {
+                        html += `<div class="riddle-line revealed">${i+1}. ${lines[i]}</div>`;
+                    }
+                    for (let i = revealed; i < total; i++) {
+                        html += `<div class="riddle-line hidden-line">${i+1}. 🔒 Indice caché</div>`;
+                    }
+                    display.innerHTML = html;
+                }
+
+                // Fonction d'affichage du timer + barre de progression
+                function updateTimerDisplay(lines, revealed, total, elapsed, interval) {
+                    const timerEl = document.getElementById('riddleTimer');
+                    const progressEl = document.getElementById('riddleProgress');
+
+                    if (revealed >= total) {
+                        timerEl.textContent = '✅ Tous vos indices sont révélés !';
+                        progressEl.style.width = '100%';
+                        return;
+                    }
+
+                    const nextIndex = revealed; // prochain à dévoiler
+                    const nextRevealTime = data.joinedAt + (nextIndex * interval) + (data.pausedTime || 0);
+                    const diff = Math.max(0, nextRevealTime - Date.now());
+                    const minutes = Math.floor(diff / (60 * 1000));
+                    const seconds = Math.floor((diff % (60 * 1000)) / 1000);
+
+                    const progress = (elapsed % interval) / interval * 100;
+                    progressEl.style.width = Math.min(progress, 100) + '%';
+
+                    const isPaused = data.isPaused || document.hidden;
+                    const pauseText = isPaused ? ' ⏸ (pause)' : '';
+
+                    if (revealed === 0) {
+                        timerEl.textContent = `⏳ Premier indice dans ${minutes}m ${seconds}s${pauseText}`;
+                    } else {
+                        timerEl.textContent = `⏳ Prochain indice dans ${minutes}m ${seconds}s (${revealed}/${total})${pauseText}`;
+                    }
+                }
+
+                // Lancer le timer (mise à jour toutes les secondes)
+                if (playerTimerInterval) clearInterval(playerTimerInterval);
+                playerTimerInterval = setInterval(updateTimer, 1000);
+
+                // Première exécution immédiate
+                updateTimer();
+
+                // Gérer la visibilité de la page (pause/reprise)
+                document.addEventListener('visibilitychange', () => {
+                    if (document.hidden) {
+                        // Le joueur a changé d'onglet ou minimisé
+                        data.isPaused = true;
+                        data.pausedTime = (data.pausedTime || 0) + (Date.now() - data.lastUpdate);
+                        playerRiddleRef.update({ isPaused: true, pausedTime: data.pausedTime });
+                        document.getElementById('riddlePauseIndicator').classList.remove('hidden');
+                        document.getElementById('onlineStatus').textContent = '🔴 Hors ligne';
+                        document.getElementById('onlineStatus').className = 'pause-indicator';
+                    } else {
+                        // Le joueur revient
+                        data.isPaused = false;
+                        data.joinedAt = Date.now() - data.pausedTime;
+                        data.pausedTime = 0;
+                        playerRiddleRef.update({ isPaused: false, joinedAt: data.joinedAt, pausedTime: 0 });
+                        document.getElementById('riddlePauseIndicator').classList.add('hidden');
+                        document.getElementById('onlineStatus').textContent = '🟢 En ligne';
+                        document.getElementById('onlineStatus').className = 'online-indicator';
+                    }
+                    data.lastUpdate = Date.now();
+                    playerRiddleRef.update({ lastUpdate: data.lastUpdate });
+                });
+
+            });
+        });
+
+        // Gestion de la déconnexion (onDisconnect) pour mettre en pause
+        const presenceRef = db.ref(`rooms/${room}/presence/${playerName}`);
+        presenceRef.onDisconnect().update({ isPaused: true, pausedTime: firebase.database.ServerValue.TIMESTAMP });
+        // Quand le joueur se reconnecte, on enlève la pause
+        presenceRef.on('value', snap => {
+            const val = snap.val();
+            if (val && val.isPaused) {
+                // Revenir du mode pause (on va le faire via le timer)
+                // Le timer se charge de reprendre
+            }
+        });
+    }
+
+    // ============================================================
+    // 7. MAÎTRE : ÉCOUTEUR DES INDICES (global)
+    // ============================================================
+    function listenToRiddleMaster(room) {
+        const riddleRef = db.ref(`rooms/${room}/riddle`);
+        riddleRef.on('value', snap => {
+            const data = snap.val();
+            if (!data || !data.lines) {
+                document.getElementById('riddleMasterStatus').textContent = 'Aucun indice en cours.';
+                document.getElementById('riddleMasterPreview').textContent = '';
+                return;
+            }
+            const lines = data.lines;
+            const total = lines.length;
+            // On peut afficher le nombre total de lignes
+            document.getElementById('riddleMasterStatus').textContent =
+                `📜 Énigme active (${total} indices). Les joueurs les reçoivent à leur rythme.`;
+            document.getElementById('riddleMasterPreview').textContent =
+                `Contenu : ${lines.slice(0, 2).join(' | ')}${lines.length > 2 ? ' ...' : ''}`;
+        });
+    }
+
     window.startRiddle = function() {
         const textarea = document.getElementById('riddleInput');
         const rawText = textarea.value;
@@ -326,28 +547,21 @@
         const room = currentRoom;
         const riddleRef = db.ref(`rooms/${room}/riddle`);
 
+        // On stocke les lignes dans la base, chaque joueur les utilisera
         riddleRef.set({
             lines: lines,
-            revealedCount: 1,
-            startTime: Date.now()
+            startedAt: Date.now()
         }).then(() => {
             console.log('[Maître] Énigme démarrée avec', lines.length, 'lignes.');
             document.getElementById('riddleInput').value = '';
-            startMasterRiddleTimer(room);
+            // Supprimer les données individuelles des joueurs pour qu'ils repartent de zéro
+            db.ref(`rooms/${room}/riddle/players`).remove();
         }).catch(err => console.warn('Erreur démarrage énigme:', err));
     };
 
     window.resetRiddle = function() {
         if (!confirm('Supprimer tous les indices en cours ?')) return;
         const room = currentRoom;
-        if (riddleTimerInterval) {
-            clearInterval(riddleTimerInterval);
-            riddleTimerInterval = null;
-        }
-        if (riddleCountdownInterval) {
-            clearInterval(riddleCountdownInterval);
-            riddleCountdownInterval = null;
-        }
         db.ref(`rooms/${room}/riddle`).remove().then(() => {
             console.log('[Maître] Énigme réinitialisée.');
             document.getElementById('riddleMasterStatus').textContent = 'Aucun indice en cours.';
@@ -355,188 +569,27 @@
         });
     };
 
-    function startMasterRiddleTimer(room) {
-        if (riddleTimerInterval) clearInterval(riddleTimerInterval);
-        if (riddleCountdownInterval) clearInterval(riddleCountdownInterval);
-
-        const riddleRef = db.ref(`rooms/${room}/riddle`);
-
-        const doIncrement = () => {
-            riddleRef.once('value').then(snap => {
-                const data = snap.val();
-                if (!data || !data.lines) return;
-                if (data.revealedCount < data.lines.length) {
-                    const newCount = data.revealedCount + 1;
-                    riddleRef.update({ revealedCount: newCount });
-                    console.log('[Maître] Nouvel indice dévoilé !');
-                } else {
-                    clearInterval(riddleTimerInterval);
-                    riddleTimerInterval = null;
-                    if (riddleCountdownInterval) {
-                        clearInterval(riddleCountdownInterval);
-                        riddleCountdownInterval = null;
-                    }
-                    document.getElementById('riddleMasterStatus').textContent = '✅ Tous les indices sont révélés !';
-                }
-            });
-        };
-
-        riddleTimerInterval = setInterval(doIncrement, 5 * 60 * 1000);
-
-        updateMasterCountdown(room);
-        riddleCountdownInterval = setInterval(() => {
-            updateMasterCountdown(room);
-        }, 1000);
-    }
-
-    function updateMasterCountdown(room) {
-        const riddleRef = db.ref(`rooms/${room}/riddle`);
-        riddleRef.once('value').then(snap => {
-            const data = snap.val();
-            if (!data || !data.lines) return;
-            const revealed = data.revealedCount || 0;
-            const total = data.lines.length;
-            const startTime = data.startTime || Date.now();
-
-            const nextIndex = revealed;
-            if (nextIndex >= total) {
-                document.getElementById('riddleMasterStatus').textContent = `📜 ${total}/${total} indices révélés. Terminé !`;
-                return;
-            }
-
-            const nextRevealTime = startTime + (nextIndex * 5 * 60 * 1000);
-            const now = Date.now();
-            const diff = Math.max(0, nextRevealTime - now);
-            const minutes = Math.floor(diff / (60 * 1000));
-            const seconds = Math.floor((diff % (60 * 1000)) / 1000);
-
-            document.getElementById('riddleMasterStatus').textContent =
-                `📜 ${revealed}/${total} indices révélés. Prochain dans ${minutes}m ${seconds}s.`;
-
-            const preview = data.lines.slice(0, revealed).join(' | ');
-            document.getElementById('riddleMasterPreview').textContent = `Aperçu : ${preview}`;
-        });
-    }
-
-    function listenToRiddleMaster(room) {
-        const riddleRef = db.ref(`rooms/${room}/riddle`);
-        riddleRef.on('value', snap => {
-            const data = snap.val();
-            if (!data || !data.lines) {
-                document.getElementById('riddleMasterStatus').textContent = 'Aucun indice en cours.';
-                document.getElementById('riddleMasterPreview').textContent = '';
-                if (riddleTimerInterval) clearInterval(riddleTimerInterval);
-                if (riddleCountdownInterval) clearInterval(riddleCountdownInterval);
-                return;
-            }
-            if (!riddleTimerInterval && data.revealedCount < data.lines.length) {
-                startMasterRiddleTimer(room);
-            }
-        });
-    }
-
-    function listenToRiddlePlayer(room) {
-        const riddleRef = db.ref(`rooms/${room}/riddle`);
-
-        const updateDisplay = (data) => {
-            const display = document.getElementById('riddleDisplay');
-            const timerEl = document.getElementById('riddleTimer');
-
-            if (!data || !data.lines) {
-                display.innerHTML = 'Aucun indice pour l\'instant...';
-                timerEl.textContent = '⏳ En attente des indices...';
-                return;
-            }
-
-            const lines = data.lines;
-            const revealed = data.revealedCount || 0;
-            const startTime = data.startTime || Date.now();
-            const total = lines.length;
-
-            if (revealed === 0) {
-                display.innerHTML = '⏳ En attente du premier indice...';
-            } else {
-                let html = '';
-                for (let i = 0; i < revealed && i < total; i++) {
-                    html += `<div class="riddle-line revealed">${i+1}. ${lines[i]}</div>`;
-                }
-                for (let i = revealed; i < total; i++) {
-                    html += `<div class="riddle-line hidden-line">${i+1}. 🔒 Indice caché</div>`;
-                }
-                display.innerHTML = html;
-            }
-
-            const nextIndex = revealed;
-            if (nextIndex >= total) {
-                timerEl.textContent = '✅ Tous les indices sont révélés !';
-                return;
-            }
-
-            const nextRevealTime = startTime + (nextIndex * 5 * 60 * 1000);
-            const now = Date.now();
-            const diff = Math.max(0, nextRevealTime - now);
-            const minutes = Math.floor(diff / (60 * 1000));
-            const seconds = Math.floor((diff % (60 * 1000)) / 1000);
-
-            if (diff > 0) {
-                timerEl.textContent = `⏳ Prochain indice dans ${minutes}m ${seconds}s (${revealed}/${total})`;
-            } else {
-                timerEl.textContent = `🔄 Le prochain indice devrait apparaître dans quelques secondes...`;
-            }
-        };
-
-        riddleRef.on('value', snap => {
-            const data = snap.val();
-            updateDisplay(data);
-        });
-
-        setInterval(() => {
-            riddleRef.once('value').then(snap => {
-                const data = snap.val();
-                if (!data) return;
-                const timerEl = document.getElementById('riddleTimer');
-
-                const lines = data.lines;
-                const revealed = data.revealedCount || 0;
-                const startTime = data.startTime || Date.now();
-                const total = lines.length;
-
-                const nextIndex = revealed;
-                if (nextIndex >= total) {
-                    timerEl.textContent = '✅ Tous les indices sont révélés !';
-                    return;
-                }
-
-                const nextRevealTime = startTime + (nextIndex * 5 * 60 * 1000);
-                const now = Date.now();
-                const diff = Math.max(0, nextRevealTime - now);
-                const minutes = Math.floor(diff / (60 * 1000));
-                const seconds = Math.floor((diff % (60 * 1000)) / 1000);
-
-                if (diff > 0) {
-                    timerEl.textContent = `⏳ Prochain indice dans ${minutes}m ${seconds}s (${revealed}/${total})`;
-                } else {
-                    timerEl.textContent = `🔄 Le prochain indice devrait apparaître dans quelques secondes...`;
-                }
-            });
-        }, 1000);
-    }
-
     // ============================================================
     // 8. NETTOYAGE
     // ============================================================
     window.onbeforeunload = function() {
-        if (currentRoom) {
-            db.ref(`rooms/${currentRoom}/guesses`).off();
-            db.ref(`rooms/${currentRoom}/secretWord`).off();
-            db.ref(`rooms/${currentRoom}/riddle`).off();
-            db.ref(`rooms/${currentRoom}/resetCounter`).off();
+        if (currentRoom && myPlayerName) {
+            // Mettre en pause le joueur
+            db.ref(`rooms/${currentRoom}/riddle/players/${myPlayerName}`).update({
+                isPaused: true,
+                pausedTime: firebase.database.ServerValue.TIMESTAMP
+            });
+            // Supprimer la présence
+            db.ref(`rooms/${currentRoom}/presence/${myPlayerName}`).remove();
         }
-        if (riddleTimerInterval) clearInterval(riddleTimerInterval);
-        if (riddleCountdownInterval) clearInterval(riddleCountdownInterval);
+        if (playerTimerInterval) {
+            clearInterval(playerTimerInterval);
+            playerTimerInterval = null;
+        }
+        db.ref(`rooms/${currentRoom}`).off();
     };
 
-    console.log('🎯 Mot Secret + Indices + Pseudo (affichage privé) chargé !');
+    console.log('🎯 Mot Secret + Indices individuels chargé !');
 </script>
 </body>
 </html>
