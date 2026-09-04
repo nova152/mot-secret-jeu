@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🎯 Mot Secret + Indices individuels</title>
+    <title>🎯 Mot Secret + Indices individuels (corrigé)</title>
     <style>
         * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, sans-serif; margin: 0; padding: 0; }
         body { background: #f0f4f8; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
@@ -158,7 +158,8 @@
 
     // Timer individuel pour le joueur
     let playerTimerInterval = null;
-    let playerRiddleData = null; // { lines, revealedCount, startTime, pausedTime }
+    let playerRiddleRef = null;
+    let playerData = null;
 
     // ============================================================
     // 3. REJOINDRE LA PARTIE
@@ -313,21 +314,24 @@
             document.getElementById('riddleDisplay').innerHTML = 'Aucun indice pour l\'instant...';
             document.getElementById('riddleTimer').textContent = '⏳ En attente des indices...';
             document.getElementById('riddleProgress').style.width = '0%';
-            // Réinitialiser le timer individuel
+            // Réinitialiser le timer individuel (le joueur repartira de zéro)
             if (playerTimerInterval) {
                 clearInterval(playerTimerInterval);
                 playerTimerInterval = null;
             }
-            // Si un nouveau riddle est démarré, le timer sera relancé par l'écouteur
+            // Supprimer les données du joueur
+            if (playerRiddleRef) {
+                playerRiddleRef.remove();
+            }
             console.log('[Joueur] Réinitialisé suite au reset.');
         });
     }
 
     // ============================================================
-    // 6. TIMER INDIVIDUEL POUR JOUEUR
+    // 6. TIMER INDIVIDUEL POUR JOUEUR (corrigé)
     // ============================================================
     function startPlayerTimer(room, playerName) {
-        const playerRiddleRef = db.ref(`rooms/${room}/riddle/players/${playerName}`);
+        playerRiddleRef = db.ref(`rooms/${room}/riddle/players/${playerName}`);
 
         // Écouter les changements des lignes (quand le maître démarre l'énigme)
         const riddleLinesRef = db.ref(`rooms/${room}/riddle/lines`);
@@ -342,7 +346,7 @@
                     clearInterval(playerTimerInterval);
                     playerTimerInterval = null;
                 }
-                // Supprimer les données du joueur
+                // Supprimer les données du joueur (car plus d'énigme)
                 playerRiddleRef.remove();
                 return;
             }
@@ -351,63 +355,65 @@
             const totalLines = lines.length;
             const intervalMs = 5 * 60 * 1000; // 5 minutes
 
-            // Lire les données existantes du joueur, ou en créer
+            // Lire ou créer les données du joueur
             playerRiddleRef.once('value').then(snap => {
                 let data = snap.val();
                 if (!data) {
-                    // Premier démarrage
+                    // Premier démarrage pour ce joueur
                     data = {
-                        joinedAt: Date.now(),
+                        joinedAt: Date.now(),   // fixe, ne change jamais
                         pausedTime: 0,
                         revealedCount: 0,
-                        isPaused: false
+                        isPaused: false,
+                        lastUpdate: Date.now()
                     };
                     playerRiddleRef.set(data);
+                } else {
+                    // Mettre à jour lastUpdate
+                    data.lastUpdate = Date.now();
+                    playerRiddleRef.update({ lastUpdate: data.lastUpdate });
                 }
-                playerRiddleData = data;
+
+                playerData = data; // stocker localement
 
                 // Fonction qui met à jour l'affichage et le compte
                 const updateTimer = () => {
-                    // Vérifier si le joueur est toujours en ligne (on utilise onDisconnect)
-                    // Pour simuler la pause, on regarde si la page est visible
+                    // Vérifier si le joueur est toujours en ligne (document visible)
                     const isPageVisible = !document.hidden;
-                    const currentPaused = data.isPaused || !isPageVisible;
+                    const currentPaused = playerData.isPaused || !isPageVisible;
 
-                    if (currentPaused && !data.isPaused) {
+                    if (currentPaused && !playerData.isPaused) {
                         // Le joueur vient de partir -> mettre en pause
-                        data.isPaused = true;
-                        data.pausedTime = (data.pausedTime || 0) + (Date.now() - data.lastUpdate);
-                        playerRiddleRef.update({ isPaused: true, pausedTime: data.pausedTime });
+                        playerData.isPaused = true;
+                        playerData.pausedTime += (Date.now() - playerData.lastUpdate);
+                        playerRiddleRef.update({ isPaused: true, pausedTime: playerData.pausedTime });
                         document.getElementById('riddlePauseIndicator').classList.remove('hidden');
                         document.getElementById('onlineStatus').textContent = '🔴 Hors ligne';
                         document.getElementById('onlineStatus').className = 'pause-indicator';
-                        return;
                     }
 
-                    if (!currentPaused && data.isPaused) {
+                    if (!currentPaused && playerData.isPaused) {
                         // Le joueur revient -> reprendre
-                        data.isPaused = false;
-                        data.joinedAt = Date.now() - data.pausedTime;
-                        data.pausedTime = 0;
-                        playerRiddleRef.update({ isPaused: false, joinedAt: data.joinedAt, pausedTime: 0 });
+                        playerData.isPaused = false;
+                        // joinedAt ne change pas, le temps de pause est déjà ajouté
+                        playerRiddleRef.update({ isPaused: false });
                         document.getElementById('riddlePauseIndicator').classList.add('hidden');
                         document.getElementById('onlineStatus').textContent = '🟢 En ligne';
                         document.getElementById('onlineStatus').className = 'online-indicator';
                     }
 
-                    // Calculer le temps écoulé effectif (depuis joinedAt, en tenant compte des pauses)
-                    const elapsed = Date.now() - data.joinedAt - (data.pausedTime || 0);
-                    const currentRevealed = data.revealedCount || 0;
+                    // Calculer le temps écoulé effectif (depuis joinedAt, en soustrayant les pauses)
+                    const elapsed = Date.now() - playerData.joinedAt - playerData.pausedTime;
+                    const currentRevealed = playerData.revealedCount || 0;
                     const nextRevealed = Math.min(Math.floor(elapsed / intervalMs) + 1, totalLines);
 
                     if (nextRevealed > currentRevealed) {
                         // Nouveaux indices à dévoiler
                         const newCount = Math.min(nextRevealed, totalLines);
-                        data.revealedCount = newCount;
+                        playerData.revealedCount = newCount;
                         playerRiddleRef.update({ revealedCount: newCount });
                         // Mettre à jour l'affichage
                         updateRiddleDisplay(lines, newCount, totalLines);
-                        // Mise à jour du timer
                         updateTimerDisplay(lines, newCount, totalLines, elapsed, intervalMs);
                     } else {
                         // Mettre à jour le timer
@@ -415,11 +421,11 @@
                     }
 
                     // Sauvegarder l'heure de dernière mise à jour
-                    data.lastUpdate = Date.now();
-                    playerRiddleRef.update({ lastUpdate: data.lastUpdate });
+                    playerData.lastUpdate = Date.now();
+                    playerRiddleRef.update({ lastUpdate: playerData.lastUpdate });
                 };
 
-                // Fonction d'affichage des indices
+                // Fonctions d'affichage
                 function updateRiddleDisplay(lines, revealed, total) {
                     const display = document.getElementById('riddleDisplay');
                     if (revealed === 0) {
@@ -436,7 +442,6 @@
                     display.innerHTML = html;
                 }
 
-                // Fonction d'affichage du timer + barre de progression
                 function updateTimerDisplay(lines, revealed, total, elapsed, interval) {
                     const timerEl = document.getElementById('riddleTimer');
                     const progressEl = document.getElementById('riddleProgress');
@@ -448,7 +453,7 @@
                     }
 
                     const nextIndex = revealed; // prochain à dévoiler
-                    const nextRevealTime = data.joinedAt + (nextIndex * interval) + (data.pausedTime || 0);
+                    const nextRevealTime = playerData.joinedAt + (nextIndex * interval) + playerData.pausedTime;
                     const diff = Math.max(0, nextRevealTime - Date.now());
                     const minutes = Math.floor(diff / (60 * 1000));
                     const seconds = Math.floor((diff % (60 * 1000)) / 1000);
@@ -456,7 +461,7 @@
                     const progress = (elapsed % interval) / interval * 100;
                     progressEl.style.width = Math.min(progress, 100) + '%';
 
-                    const isPaused = data.isPaused || document.hidden;
+                    const isPaused = playerData.isPaused || document.hidden;
                     const pauseText = isPaused ? ' ⏸ (pause)' : '';
 
                     if (revealed === 0) {
@@ -474,41 +479,51 @@
                 updateTimer();
 
                 // Gérer la visibilité de la page (pause/reprise)
-                document.addEventListener('visibilitychange', () => {
+                const visibilityHandler = () => {
                     if (document.hidden) {
                         // Le joueur a changé d'onglet ou minimisé
-                        data.isPaused = true;
-                        data.pausedTime = (data.pausedTime || 0) + (Date.now() - data.lastUpdate);
-                        playerRiddleRef.update({ isPaused: true, pausedTime: data.pausedTime });
+                        playerData.isPaused = true;
+                        playerData.pausedTime += (Date.now() - playerData.lastUpdate);
+                        playerRiddleRef.update({ isPaused: true, pausedTime: playerData.pausedTime });
                         document.getElementById('riddlePauseIndicator').classList.remove('hidden');
                         document.getElementById('onlineStatus').textContent = '🔴 Hors ligne';
                         document.getElementById('onlineStatus').className = 'pause-indicator';
                     } else {
                         // Le joueur revient
-                        data.isPaused = false;
-                        data.joinedAt = Date.now() - data.pausedTime;
-                        data.pausedTime = 0;
-                        playerRiddleRef.update({ isPaused: false, joinedAt: data.joinedAt, pausedTime: 0 });
+                        playerData.isPaused = false;
+                        playerRiddleRef.update({ isPaused: false });
                         document.getElementById('riddlePauseIndicator').classList.add('hidden');
                         document.getElementById('onlineStatus').textContent = '🟢 En ligne';
                         document.getElementById('onlineStatus').className = 'online-indicator';
                     }
-                    data.lastUpdate = Date.now();
-                    playerRiddleRef.update({ lastUpdate: data.lastUpdate });
+                    playerData.lastUpdate = Date.now();
+                    playerRiddleRef.update({ lastUpdate: playerData.lastUpdate });
+                };
+                document.addEventListener('visibilitychange', visibilityHandler);
+                // Stocker le handler pour le nettoyer plus tard
+                window._visibilityHandler = visibilityHandler;
+
+                // Gestion de la déconnexion (onDisconnect) pour mettre en pause
+                const presenceRef = db.ref(`rooms/${room}/presence/${playerName}`);
+                presenceRef.onDisconnect().update({ isPaused: true, pausedTime: firebase.database.ServerValue.TIMESTAMP });
+                // Quand le joueur se reconnecte, on enlève la pause (déjà géré par le timer)
+                presenceRef.on('value', snap => {
+                    // On ne fait rien, le timer gère la reprise
                 });
 
             });
         });
 
-        // Gestion de la déconnexion (onDisconnect) pour mettre en pause
-        const presenceRef = db.ref(`rooms/${room}/presence/${playerName}`);
-        presenceRef.onDisconnect().update({ isPaused: true, pausedTime: firebase.database.ServerValue.TIMESTAMP });
-        // Quand le joueur se reconnecte, on enlève la pause
-        presenceRef.on('value', snap => {
-            const val = snap.val();
-            if (val && val.isPaused) {
-                // Revenir du mode pause (on va le faire via le timer)
-                // Le timer se charge de reprendre
+        // Nettoyage à la fermeture
+        window.addEventListener('beforeunload', () => {
+            if (playerRiddleRef && playerData) {
+                playerData.isPaused = true;
+                playerData.pausedTime += (Date.now() - playerData.lastUpdate);
+                playerRiddleRef.update({ isPaused: true, pausedTime: playerData.pausedTime });
+            }
+            if (playerTimerInterval) {
+                clearInterval(playerTimerInterval);
+                playerTimerInterval = null;
             }
         });
     }
@@ -527,7 +542,6 @@
             }
             const lines = data.lines;
             const total = lines.length;
-            // On peut afficher le nombre total de lignes
             document.getElementById('riddleMasterStatus').textContent =
                 `📜 Énigme active (${total} indices). Les joueurs les reçoivent à leur rythme.`;
             document.getElementById('riddleMasterPreview').textContent =
@@ -547,7 +561,7 @@
         const room = currentRoom;
         const riddleRef = db.ref(`rooms/${room}/riddle`);
 
-        // On stocke les lignes dans la base, chaque joueur les utilisera
+        // Stocker les lignes et supprimer les données individuelles des joueurs (pour repartir de zéro)
         riddleRef.set({
             lines: lines,
             startedAt: Date.now()
@@ -574,22 +588,22 @@
     // ============================================================
     window.onbeforeunload = function() {
         if (currentRoom && myPlayerName) {
-            // Mettre en pause le joueur
-            db.ref(`rooms/${currentRoom}/riddle/players/${myPlayerName}`).update({
-                isPaused: true,
-                pausedTime: firebase.database.ServerValue.TIMESTAMP
-            });
-            // Supprimer la présence
             db.ref(`rooms/${currentRoom}/presence/${myPlayerName}`).remove();
         }
         if (playerTimerInterval) {
             clearInterval(playerTimerInterval);
             playerTimerInterval = null;
         }
-        db.ref(`rooms/${currentRoom}`).off();
+        if (currentRoom) {
+            db.ref(`rooms/${currentRoom}`).off();
+        }
+        // Supprimer l'écouteur visibilitychange
+        if (window._visibilityHandler) {
+            document.removeEventListener('visibilitychange', window._visibilityHandler);
+        }
     };
 
-    console.log('🎯 Mot Secret + Indices individuels chargé !');
+    console.log('🎯 Mot Secret + Indices individuels (corrigé) chargé !');
 </script>
 </body>
 </html>
