@@ -144,7 +144,6 @@
 <!-- FIREBASE SDK -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-check-compat.js"></script>    
     
 
 <script>
@@ -163,12 +162,7 @@
 
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
-        // Activer App Check
-    const appCheck = firebase.appCheck();
-appCheck.activate(
-    new firebase.appCheck.ReCaptchaEnterpriseProvider('6LeZacItAAAAAJ9qFGE5Eef-SwX_jmNEqwQsZ7eG'),
-    true
-);
+    
 
     // ============================================================
     // 2. VARIABLES GLOBALES
