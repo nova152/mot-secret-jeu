@@ -165,7 +165,10 @@
     const db = firebase.database();
         // Activer App Check
     const appCheck = firebase.appCheck();
-    appCheck.activate('6LeZacItAAAAAJ9qFGE5Eef-SwX_jmNEqwQsZ7eG', false, 'RECAPTCHA_ENTERPRISE');
+appCheck.activate(
+    new firebase.appCheck.ReCaptchaEnterpriseProvider('6LeZacItAAAAAJ9qFGE5Eef-SwX_jmNEqwQsZ7eG'),
+    true
+);
 
     // ============================================================
     // 2. VARIABLES GLOBALES
